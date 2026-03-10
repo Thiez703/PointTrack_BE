@@ -44,7 +44,7 @@ public class OpenApiConfig {
     public GroupedOpenApi authApi() {
         return GroupedOpenApi.builder()
                 .group("1. Authentication")
-                .pathsToMatch("/api/auth/**")
+                .pathsToMatch("/api/v1/auth/**")
                 .build();
     }
 

@@ -3,7 +3,6 @@ package com.teco.pointtrack.config;
 import com.teco.pointtrack.entity.Permission;
 import com.teco.pointtrack.entity.Role;
 import com.teco.pointtrack.entity.User;
-import com.teco.pointtrack.entity.enums.AuthProvider;
 import com.teco.pointtrack.entity.enums.PermissionGroup;
 import com.teco.pointtrack.entity.enums.PermissionType;
 import com.teco.pointtrack.entity.enums.UserStatus;
@@ -65,8 +64,8 @@ public class DataSeeder implements CommandLineRunner {
         if (!roleRepository.existsBySlug("USER")) {
             Role userRole = Role.builder()
                     .slug("USER")
-                    .displayName("Người dùng")
-                    .description("Người dùng thông thường")
+                    .displayName("Nhân viên")
+                    .description("Nhân viên phục vụ tại nhà khách hàng")
                     .isActive(true)
                     .isSystem(true)
                     .permissions(new HashSet<>())
@@ -86,12 +85,13 @@ public class DataSeeder implements CommandLineRunner {
                     .email("admin@pointtrack.com")
                     .passwordHash(passwordEncoder.encode("Admin@123"))
                     .status(UserStatus.ACTIVE)
-                    .provider(AuthProvider.LOCAL)
+                    // BR-02: Admin seed sẵn → isFirstLogin = false (không cần đổi MK)
+                    .isFirstLogin(false)
                     .role(adminRole)
                     .build();
 
             userRepository.save(admin);
-            log.info("Seeded admin user: admin@pointtrack.com / Admin@123");
+            log.info("Seeded admin: admin@pointtrack.com / Admin@123");
         }
     }
 

@@ -40,14 +40,20 @@ public class SecurityConfig {
     @Value("${app.cors.allowed-origins}")
     private String allowedOriginPatterns;
 
+    /** Các endpoint không cần JWT – căn chỉnh theo prefix /api/v1/ (DC-09) */
     private static final String[] PUBLIC_MATCHERS = {
-            "/api/auth/**",
+            // Auth: chỉ login, forgot password, reset password là public
+            "/api/v1/auth/login",
+            "/api/v1/auth/password/forgot",
+            "/api/v1/auth/password/reset",
+            "/api/v1/auth/token/refresh",
+            // Swagger / API docs
             "/swagger-ui/**",
             "/swagger-ui.html",
             "/v3/api-docs/**",
             "/swagger-resources/**",
-            "/configuration/**",
             "/api-docs/**",
+            // Health check
             "/actuator/health",
             "/actuator/info",
     };

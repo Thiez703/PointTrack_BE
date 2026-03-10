@@ -10,8 +10,12 @@ import java.util.Optional;
 public interface UserRepository extends JpaRepository<User, Long> {
 
     Optional<User> findByEmail(String email);
-    Optional<User> findByPhoneNumber(String phoneNumber);
+
+    /** Chỉ lấy user chưa bị soft delete */
+    Optional<User> findByEmailAndDeletedAtIsNull(String email);
+
     boolean existsByEmail(String email);
-    boolean existsByPhoneNumber(String phoneNumber);
-    boolean existsByCitizenId(String citizenId);
+
+    /** FR-04: tìm user theo reset token để đặt lại mật khẩu */
+    Optional<User> findByResetPasswordToken(String token);
 }

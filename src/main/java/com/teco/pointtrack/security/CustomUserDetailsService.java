@@ -25,11 +25,10 @@ public class CustomUserDetailsService implements UserDetailsService {
 
     @Override
     @Transactional(readOnly = true)
-    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+    public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
 
-        User user = userRepository.findByEmail(username)
-                .or(() -> userRepository.findByPhoneNumber(username))
-                .orElseThrow(() -> new UsernameNotFoundException("Tài khoản không tồn tại hoặc mật khẩu sai"));
+        User user = userRepository.findByEmailAndDeletedAtIsNull(email)
+                .orElseThrow(() -> new UsernameNotFoundException("Tài khoản không tồn tại"));
 
         Set<GrantedAuthority> authorities = buildAuthorities(user);
 
@@ -37,7 +36,7 @@ public class CustomUserDetailsService implements UserDetailsService {
                 .id(user.getId())
                 .email(user.getEmail())
                 .phoneNumber(user.getPhoneNumber())
-                .contact(user.getEmail() != null ? user.getEmail() : user.getPhoneNumber())
+                .contact(user.getEmail())
                 .fullName(user.getFullName())
                 .avatarUrl(user.getAvatarUrl())
                 .status(user.getStatus())
@@ -46,10 +45,10 @@ public class CustomUserDetailsService implements UserDetailsService {
                 .role(user.getRole() != null ? new RoleDto(user.getRole()) : null)
                 .build();
 
+        // BR-22: ACTIVE = enabled, INACTIVE = disabled
         boolean enabled = (user.getStatus() == UserStatus.ACTIVE);
-        boolean accountNonLocked = (user.getStatus() != UserStatus.BANNED);
 
-        return new CustomUserDetail(username, user.getPasswordHash(), enabled, accountNonLocked, userDetailDto, authorities);
+        return new CustomUserDetail(user.getEmail(), user.getPasswordHash(), enabled, true, userDetailDto, authorities);
     }
 
     private Set<GrantedAuthority> buildAuthorities(User user) {
@@ -59,11 +58,10 @@ public class CustomUserDetailsService implements UserDetailsService {
         authorities.add(new SimpleGrantedAuthority("ROLE_" + user.getRole().getSlug()));
 
         if (user.getRole().getPermissions() != null) {
-            user.getRole().getPermissions().forEach(permission ->
-                    authorities.add(new SimpleGrantedAuthority(permission.getCode()))
+            user.getRole().getPermissions().forEach(p ->
+                    authorities.add(new SimpleGrantedAuthority(p.getCode()))
             );
         }
-
         return authorities;
     }
 }

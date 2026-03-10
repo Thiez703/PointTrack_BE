@@ -1,7 +1,6 @@
 package com.teco.pointtrack.entity;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.teco.pointtrack.entity.enums.AuthProvider;
 import com.teco.pointtrack.entity.enums.Gender;
 import com.teco.pointtrack.entity.enums.UserStatus;
 import jakarta.persistence.*;
@@ -24,49 +23,80 @@ public class User extends BaseEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    Long id;
 
     @Column(name = "full_name", length = 100)
-    private String fullName;
+    String fullName;
 
-    @Column(unique = true, length = 100)
-    private String email;
+    /** BR-23: email duy nhất toàn hệ thống */
+    @Column(unique = true, length = 150)
+    String email;
 
     @Column(name = "password_hash", nullable = false)
-    private String passwordHash;
+    @JsonIgnore
+    String passwordHash;
 
-    @Column(name = "phone_number", length = 10, unique = true)
-    private String phoneNumber;
-
-    @Column(name = "citizen_id", length = 12, unique = true)
-    private String citizenId;
+    @Column(name = "phone_number", length = 15, unique = true)
+    String phoneNumber;
 
     @Column(name = "date_of_birth")
-    private LocalDate dateOfBirth;
+    LocalDate dateOfBirth;
 
-    @Column(name = "avatar_url")
-    private String avatarUrl;
-
-    @Enumerated(EnumType.ORDINAL)
-    @Column(columnDefinition = "TINYINT")
-    private Gender gender;
+    @Column(name = "avatar_url", length = 500)
+    String avatarUrl;
 
     @Enumerated(EnumType.STRING)
-    @Column(columnDefinition = "ENUM('ACTIVE', 'INACTIVE', 'BANNED', 'UNVERIFIED')")
-    private UserStatus status;
+    @Column(columnDefinition = "TINYINT")
+    Gender gender;
+
+    /** BR-22: soft delete - không xóa vật lý */
+    @Enumerated(EnumType.STRING)
+    @Column(columnDefinition = "ENUM('ACTIVE','INACTIVE')", nullable = false)
+    @Builder.Default
+    UserStatus status = UserStatus.ACTIVE;
+
+    // ── Auth fields ───────────────────────────────────────────────────────────
+
+    /**
+     * BR-02: NV mới do Admin tạo → isFirstLogin = true
+     * Bắt buộc đổi MK tạm trong lần đăng nhập đầu tiên
+     */
+    @Column(name = "is_first_login", nullable = false)
+    @Builder.Default
+    boolean isFirstLogin = true;
+
+    /** FR-02: ghi nhận thời gian đăng nhập cuối */
+    @Column(name = "last_login_at")
+    LocalDateTime lastLoginAt;
+
+    /** FR-02: ghi nhận IP đăng nhập cuối */
+    @Column(name = "last_login_ip", length = 45)
+    String lastLoginIp;
+
+    // ── Reset password (FR-04) ────────────────────────────────────────────────
+
+    /** UUID token gửi qua email, hết hạn 15 phút */
+    @Column(name = "reset_password_token", length = 100)
+    String resetPasswordToken;
+
+    @Column(name = "reset_token_expired_at")
+    LocalDateTime resetTokenExpiredAt;
+
+    // ── Soft delete (BR-22) ───────────────────────────────────────────────────
 
     @Column(name = "deleted_at")
-    private LocalDateTime deletedAt;
+    LocalDateTime deletedAt;
+
+    /** Ngày vào làm */
+    @Column(name = "start_date")
+    LocalDate startDate;
+
+    // ── Relations ─────────────────────────────────────────────────────────────
 
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "role_id")
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     @JsonIgnore
-    private Role role;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "auth_provider")
-    @JsonIgnore
-    private AuthProvider provider;
+    Role role;
 }
