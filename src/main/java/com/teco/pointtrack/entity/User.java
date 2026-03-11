@@ -99,4 +99,13 @@ public class User extends BaseEntity {
     @EqualsAndHashCode.Exclude
     @JsonIgnore
     Role role;
+
+    // ── Salary Level ────────────────────────────────────────────────────────────
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "salary_level_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    @JsonIgnore
+    SalaryLevel salaryLevel;
 }

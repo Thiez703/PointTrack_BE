@@ -25,4 +25,7 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
 
     /** Tìm user theo số điện thoại, chưa bị soft delete */
     Optional<User> findByPhoneNumberAndDeletedAtIsNull(String phoneNumber);
+
+    /** Kiểm tra nhân viên đang dùng salary level — dùng cho delete validation */
+    boolean existsBySalaryLevelIdAndDeletedAtIsNull(Long salaryLevelId);
 }

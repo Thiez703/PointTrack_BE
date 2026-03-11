@@ -1,6 +1,7 @@
 package com.teco.pointtrack.dto.user;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.teco.pointtrack.dto.salary.SalaryLevelResponse;
 import com.teco.pointtrack.entity.enums.Gender;
 import com.teco.pointtrack.entity.enums.UserStatus;
 
@@ -28,6 +29,7 @@ public class UserDetail implements Serializable {
     Gender gender;
     UserStatus status;
     RoleDto role;
+    SalaryLevelResponse salaryLevel;
     LocalDateTime createdAt;
     LocalDateTime updatedAt;
 }
