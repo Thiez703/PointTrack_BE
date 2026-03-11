@@ -110,6 +110,12 @@
             <version>3.18.0</version>
         </dependency>
 
+        <!-- HTTP Client cho Google Maps Geocoding API -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
+
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
