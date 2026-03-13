@@ -29,7 +29,12 @@ public class UserDetail implements Serializable {
     Gender gender;
     UserStatus status;
     RoleDto role;
+    
+    // Thông tin cấp bậc lương
+    Long salaryLevelId;
+    String salaryLevelName;
     SalaryLevelResponse salaryLevel;
+    
     LocalDateTime createdAt;
     LocalDateTime updatedAt;
 }

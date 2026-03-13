@@ -25,9 +25,9 @@ public class CustomUserDetailsService implements UserDetailsService {
 
     @Override
     @Transactional(readOnly = true)
-    public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
+    public UserDetails loadUserByUsername(String phoneNumber) throws UsernameNotFoundException {
 
-        User user = userRepository.findByEmailAndDeletedAtIsNull(email)
+        User user = userRepository.findByPhoneNumberAndDeletedAtIsNull(phoneNumber)
                 .orElseThrow(() -> new UsernameNotFoundException("Tài khoản không tồn tại"));
 
         Set<GrantedAuthority> authorities = buildAuthorities(user);
@@ -36,7 +36,7 @@ public class CustomUserDetailsService implements UserDetailsService {
                 .id(user.getId())
                 .email(user.getEmail())
                 .phoneNumber(user.getPhoneNumber())
-                .contact(user.getEmail())
+                .contact(user.getPhoneNumber())
                 .fullName(user.getFullName())
                 .avatarUrl(user.getAvatarUrl())
                 .status(user.getStatus())
@@ -48,7 +48,7 @@ public class CustomUserDetailsService implements UserDetailsService {
         // BR-22: ACTIVE = enabled, INACTIVE = disabled
         boolean enabled = (user.getStatus() == UserStatus.ACTIVE);
 
-        return new CustomUserDetail(user.getEmail(), user.getPasswordHash(), enabled, true, userDetailDto, authorities);
+        return new CustomUserDetail(user.getPhoneNumber(), user.getPasswordHash(), enabled, true, userDetailDto, authorities);
     }
 
     private Set<GrantedAuthority> buildAuthorities(User user) {

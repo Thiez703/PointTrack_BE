@@ -9,19 +9,20 @@ import lombok.experimental.FieldDefaults;
 
 /**
  * Request body cho PUT /api/v1/personnel/{id}
- * Tất cả field đều optional — chỉ cập nhật field khác null
+ * Chỉ dùng để cập nhật thông tin cá nhân.
+ * Không bao gồm gán cấp bậc lương (đã tách ra API riêng).
  */
 @Data
 @FieldDefaults(level = AccessLevel.PRIVATE)
 public class UpdateEmployeeRequest {
 
-    @Size(min = 2, max = 100)
+    @Size(min = 2, max = 100, message = "Họ tên phải từ 2 đến 100 ký tự")
     String fullName;
 
-    @Pattern(regexp = "^[0-9]{10,11}$")
+    @Pattern(regexp = "^\\d{10}$", message = "Số điện thoại phải bao gồm 10 chữ số")
     String phoneNumber;
 
-    /** Định dạng yyyy-MM-dd, parse sang LocalDate trong service */
+    /** Định dạng hỗ trợ: dd/MM/yyyy hoặc yyyy-MM-dd */
     String dateOfBirth;
 
     String avatarUrl;
@@ -29,7 +30,8 @@ public class UpdateEmployeeRequest {
     /** MALE / FEMALE / OTHER */
     Gender gender;
 
-    /** Định dạng yyyy-MM-dd, parse sang LocalDate trong service */
+    /** Định dạng hỗ trợ: dd/MM/yyyy hoặc yyyy-MM-dd */
     String startDate;
-}
 
+    // salaryLevelId đã bị xóa khỏi đây để tách sang API riêng biệt
+}
