@@ -1,0 +1,51 @@
+spring:
+  application:
+    name: pointtrack
+
+  # DATABASE (MySQL)
+  datasource:
+    url: jdbc:mysql://localhost:3307/pointtrack_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    username: root
+    password: ${SPRING_DATASOURCE_PASSWORD:123456}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  # JPA
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQLDialect
+
+  # REDIS (for JWT revocation)
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+  main:
+    allow-bean-definition-overriding: true
+
+# JWT
+security:
+  jwt:
+    secret-key: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
+    issuer: ${JWT_ISSUER:pointtrack}
+    expiry-time-in-seconds: 3600        # 1 hour
+    refreshable-duration: 604800        # 7 days
+
+# App Config
+app:
+  cors:
+    allowed-origins: "http://localhost:3000,http://localhost:8080"
+  turnstile:
+    secret-key: ${TURNSTILE_SECRET_KEY:1x0000000000000000000000000000000AA}
+    url: "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+  google:
+    client-id: ${GOOGLE_CLIENT_ID:}
+    maps-api-key: ${GOOGLE_MAPS_API_KEY:}
+  cookie:
+    secure: false
+    same-site: Lax

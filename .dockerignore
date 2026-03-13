@@ -1,0 +1,10 @@
+target/
+.git/
+.idea/
+.vscode/
+*.log
+.mvn/
+mvnw
+mvnw.cmd
+README.md
+GEMINI.md
