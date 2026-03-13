@@ -1,6 +1,7 @@
 package com.teco.pointtrack.repository;
 
 import com.teco.pointtrack.entity.User;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.stereotype.Repository;
@@ -12,7 +13,7 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
 
     Optional<User> findByEmail(String email);
 
-    /** Chỉ lấy user chưa bị soft delete */
+    @EntityGraph(attributePaths = {"role", "role.permissions"})
     Optional<User> findByEmailAndDeletedAtIsNull(String email);
 
     boolean existsByEmail(String email);
@@ -20,7 +21,10 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
     /** FR-04: tìm user theo reset token để đặt lại mật khẩu */
     Optional<User> findByResetPasswordToken(String token);
 
-    /** Chỉ lấy user chưa bị soft delete theo ID */
+    @EntityGraph(attributePaths = {"role"})
+    org.springframework.data.domain.Page<User> findAll(org.springframework.data.jpa.domain.Specification<User> spec, org.springframework.data.domain.Pageable pageable);
+
+    /** Chỉ lấy user chưa bị soft delete */
     Optional<User> findByIdAndDeletedAtIsNull(Long id);
 
     /** Tìm user theo số điện thoại, chưa bị soft delete */

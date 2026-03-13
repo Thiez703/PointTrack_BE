@@ -26,7 +26,7 @@ import java.util.List;
 public class OpenApiConfig {
 
     @Bean
-    public OpenAPI customOpenAPI(@Value("${app.server.url:http://localhost:8080}") String serverUrl) {
+    public OpenAPI customOpenAPI(@Value("${APP_SERVER_URL:http://localhost:8080}") String serverUrl) {
         return new OpenAPI()
                 .servers(List.of(
                         new Server().url(serverUrl).description("Default Server")

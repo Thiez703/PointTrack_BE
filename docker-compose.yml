@@ -43,7 +43,7 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "${APP_PORT:-8080}:8080"
+      - "${APP_PORT:-8081}:8080"
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
       SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/${MYSQL_DATABASE:-pointtrack_db}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
@@ -54,7 +54,8 @@ services:
       JWT_ISSUER: ${JWT_ISSUER:-pointtrack}
       TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-1x0000000000000000000000000000000AA}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-      APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8081}
+      APP_SERVER_URL: http://localhost:8081
       APP_COOKIE_SECURE: ${APP_COOKIE_SECURE:-true}
       SPRING_JPA_HIBERNATE_DDL_AUTO: ${HIBERNATE_DDL_AUTO:-update}
 

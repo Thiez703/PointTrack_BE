@@ -12,7 +12,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "users")
+@Table(name = "users", indexes = {
+        @Index(name = "idx_user_deleted_at", columnList = "deleted_at"),
+        @Index(name = "idx_user_status", columnList = "status")
+})
 @Getter
 @Setter
 @NoArgsConstructor
@@ -93,7 +96,7 @@ public class User extends BaseEntity {
 
     // ── Relations ─────────────────────────────────────────────────────────────
 
-    @ManyToOne(fetch = FetchType.EAGER)
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "role_id")
     @ToString.Exclude
     @EqualsAndHashCode.Exclude

@@ -10,6 +10,9 @@ import java.util.Optional;
 @Repository
 public interface SalaryLevelRepository extends JpaRepository<SalaryLevel, Long> {
 
+    /** Tìm cấp bậc theo tên, chưa bị soft delete */
+    Optional<SalaryLevel> findByNameAndDeletedAtIsNull(String name);
+
     /** Kiểm tra tên cấp bậc trùng (chưa bị soft delete) — dùng khi tạo mới */
     boolean existsByNameAndDeletedAtIsNull(String name);
 

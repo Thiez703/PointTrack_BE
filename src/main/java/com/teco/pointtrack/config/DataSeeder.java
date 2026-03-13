@@ -2,12 +2,14 @@ package com.teco.pointtrack.config;
 
 import com.teco.pointtrack.entity.Permission;
 import com.teco.pointtrack.entity.Role;
+import com.teco.pointtrack.entity.SalaryLevel;
 import com.teco.pointtrack.entity.User;
 import com.teco.pointtrack.entity.enums.PermissionGroup;
 import com.teco.pointtrack.entity.enums.PermissionType;
 import com.teco.pointtrack.entity.enums.UserStatus;
 import com.teco.pointtrack.repository.PermissionRepository;
 import com.teco.pointtrack.repository.RoleRepository;
+import com.teco.pointtrack.repository.SalaryLevelRepository;
 import com.teco.pointtrack.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,6 +19,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -29,6 +32,7 @@ public class DataSeeder implements CommandLineRunner {
     private final RoleRepository roleRepository;
     private final PermissionRepository permissionRepository;
     private final UserRepository userRepository;
+    private final SalaryLevelRepository salaryLevelRepository;
     private final PasswordEncoder passwordEncoder;
 
     @Override
@@ -36,6 +40,7 @@ public class DataSeeder implements CommandLineRunner {
     public void run(String... args) {
         seedPermissions();
         seedRoles();
+        seedSalaryLevels(); // Tự động tạo cấp bậc lương
         seedAdminUser();
     }
 
@@ -75,23 +80,46 @@ public class DataSeeder implements CommandLineRunner {
         }
     }
 
+    /**
+     * Tự động tạo 3 cấp bậc lương mặc định
+     */
+    private void seedSalaryLevels() {
+        createSalaryLevelIfNotExists("Cấp 1", 50000, "Lương cơ bản 50.000 VNĐ/giờ");
+        createSalaryLevelIfNotExists("Cấp 2", 70000, "Lương cơ bản 70.000 VNĐ/giờ");
+        createSalaryLevelIfNotExists("Cấp 3", 100000, "Lương cơ bản 100.000 VNĐ/giờ");
+    }
+
+    private void createSalaryLevelIfNotExists(String name, long amount, String description) {
+        if (salaryLevelRepository.findByNameAndDeletedAtIsNull(name).isEmpty()) {
+            SalaryLevel level = SalaryLevel.builder()
+                    .name(name)
+                    .baseSalary(BigDecimal.valueOf(amount))
+                    .description(description)
+                    .isActive(true)
+                    .build();
+            salaryLevelRepository.save(level);
+            log.info("Seeded salary level: {} ({} VNĐ/h)", name, amount);
+        }
+    }
+
     private void seedAdminUser() {
-        if (!userRepository.existsByEmail("admin@pointtrack.com")) {
+        String adminPhone = "0987654321";
+        if (userRepository.findByPhoneNumberAndDeletedAtIsNull(adminPhone).isEmpty()) {
             Role adminRole = roleRepository.findBySlug("ADMIN")
                     .orElseThrow(() -> new RuntimeException("Role ADMIN not found"));
 
             User admin = User.builder()
                     .fullName("PointTrack Admin")
+                    .phoneNumber(adminPhone)
                     .email("admin@pointtrack.com")
-                    .passwordHash(passwordEncoder.encode("Admin@123"))
+                    .passwordHash(passwordEncoder.encode("123456"))
                     .status(UserStatus.ACTIVE)
-                    // BR-02: Admin seed sẵn → isFirstLogin = false (không cần đổi MK)
                     .isFirstLogin(false)
                     .role(adminRole)
                     .build();
 
             userRepository.save(admin);
-            log.info("Seeded admin user: admin@pointtrack.com (check config for credentials)");
+            log.info("Seeded admin user: {} / 123456", adminPhone);
         }
     }
 

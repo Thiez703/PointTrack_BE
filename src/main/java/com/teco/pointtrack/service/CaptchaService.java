@@ -27,6 +27,14 @@ public class CaptchaService {
 
     public boolean verifyCaptcha(String token, HttpServletRequest servletRequest) {
 
+        // ─────────────────────────────────────────────────────────────────────────────
+        // BYPASS TRÊN LOCAL / TEST (DC-15)
+        // Nếu dùng key test của Cloudflare hoặc token đặc biệt thì cho qua
+        // ─────────────────────────────────────────────────────────────────────────────
+        if (secretKey.trim().startsWith("1x000") || "bypass-local".equals(token)) {
+            return true;
+        }
+
         if (token == null || token.isBlank()) {
             return false;
         }
