@@ -1,6 +1,8 @@
 spring:
   application:
     name: pointtrack
+  profiles:
+    active: dev
 
   # DATABASE (MySQL)
   datasource:
@@ -28,6 +30,9 @@ spring:
   main:
     allow-bean-definition-overriding: true
 
+server:
+  port: 8080
+
 # JWT
 security:
   jwt:
@@ -37,6 +42,15 @@ security:
     refreshable-duration: 604800        # 7 days
 
 # App Config
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operationsSorter: alpha
+    tagsSorter: alpha
+    display-request-duration: true
+
 app:
   cors:
     allowed-origins: "http://localhost:3000,http://localhost:8080"

@@ -41,6 +41,14 @@ public class OpenApiConfig {
     }
 
     @Bean
+    public GroupedOpenApi allApi() {
+        return GroupedOpenApi.builder()
+                .group("0. All APIs")
+                .pathsToMatch("/**")
+                .build();
+    }
+
+    @Bean
     public GroupedOpenApi authApi() {
         return GroupedOpenApi.builder()
                 .group("1. Authentication")
@@ -49,10 +57,18 @@ public class OpenApiConfig {
     }
 
     @Bean
-    public GroupedOpenApi allApi() {
+    public GroupedOpenApi personnelApi() {
         return GroupedOpenApi.builder()
-                .group("0. All APIs")
-                .pathsToMatch("/**")
+                .group("2. Personnel")
+                .pathsToMatch("/api/v1/personnel/**", "/api/v1/salary-levels/**", "/api/v1/customers/**")
+                .build();
+    }
+
+    @Bean
+    public GroupedOpenApi schedulingApi() {
+        return GroupedOpenApi.builder()
+                .group("3. Scheduling")
+                .pathsToMatch("/api/v1/scheduling/**")
                 .build();
     }
 }

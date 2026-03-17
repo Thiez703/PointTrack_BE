@@ -3,6 +3,7 @@ package com.teco.pointtrack.config;
 import com.teco.pointtrack.entity.Permission;
 import com.teco.pointtrack.entity.Role;
 import com.teco.pointtrack.entity.SalaryLevel;
+import com.teco.pointtrack.entity.SystemSetting;
 import com.teco.pointtrack.entity.User;
 import com.teco.pointtrack.entity.enums.PermissionGroup;
 import com.teco.pointtrack.entity.enums.PermissionType;
@@ -10,6 +11,7 @@ import com.teco.pointtrack.entity.enums.UserStatus;
 import com.teco.pointtrack.repository.PermissionRepository;
 import com.teco.pointtrack.repository.RoleRepository;
 import com.teco.pointtrack.repository.SalaryLevelRepository;
+import com.teco.pointtrack.repository.SystemSettingRepository;
 import com.teco.pointtrack.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +35,7 @@ public class DataSeeder implements CommandLineRunner {
     private final PermissionRepository permissionRepository;
     private final UserRepository userRepository;
     private final SalaryLevelRepository salaryLevelRepository;
+    private final SystemSettingRepository systemSettingRepository;
     private final PasswordEncoder passwordEncoder;
 
     @Override
@@ -40,7 +43,8 @@ public class DataSeeder implements CommandLineRunner {
     public void run(String... args) {
         seedPermissions();
         seedRoles();
-        seedSalaryLevels(); // Tự động tạo cấp bậc lương
+        seedSalaryLevels();
+        seedSystemSettings();
         seedAdminUser();
     }
 
@@ -99,6 +103,27 @@ public class DataSeeder implements CommandLineRunner {
                     .build();
             salaryLevelRepository.save(level);
             log.info("Seeded salary level: {} ({} VNĐ/h)", name, amount);
+        }
+    }
+
+    private void seedSystemSettings() {
+        createSettingIfNotExists("GRACE_PERIOD_MINUTES", "5",
+                "Số phút check-in muộn vẫn tính đúng giờ (BR-11)");
+        createSettingIfNotExists("TRAVEL_BUFFER_MINUTES", "15",
+                "Thời gian đệm di chuyển tối thiểu giữa 2 ca (BR-09)");
+        createSettingIfNotExists("PENALTY_RULES",
+                "[{\"minLateMinutes\":15,\"penaltyShift\":0.5},{\"minLateMinutes\":30,\"penaltyShift\":1.0}]",
+                "Bậc thang trừ công khi check-in muộn (BR-12)");
+        log.info("Seeded system settings");
+    }
+
+    private void createSettingIfNotExists(String key, String value, String description) {
+        if (!systemSettingRepository.existsById(key)) {
+            systemSettingRepository.save(SystemSetting.builder()
+                    .key(key)
+                    .value(value)
+                    .description(description)
+                    .build());
         }
     }
 
