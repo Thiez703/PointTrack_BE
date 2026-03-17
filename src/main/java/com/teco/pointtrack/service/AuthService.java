@@ -41,7 +41,6 @@ public class AuthService {
     private final CaptchaService captchaService;
     private final JwtUtils jwtUtils;
     private final CustomUserDetailsService userDetailsService;
-
     private static final String ROLE_USER  = "USER";
     private static final String ROLE_ADMIN = "ADMIN";
 

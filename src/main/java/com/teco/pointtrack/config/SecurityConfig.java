@@ -48,11 +48,12 @@ public class SecurityConfig {
             "/api/v1/auth/password/reset",
             "/api/v1/auth/token/refresh",
             // Swagger / API docs
-            "/swagger-ui/**",
             "/swagger-ui.html",
+            "/swagger-ui/**",
             "/v3/api-docs/**",
-            "/swagger-resources/**",
             "/api-docs/**",
+            "/swagger-resources/**",
+            "/webjars/**",
             // Health check
             "/actuator/health",
             "/actuator/info",
