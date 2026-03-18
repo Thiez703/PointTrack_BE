@@ -46,6 +46,7 @@ public class DataSeeder implements CommandLineRunner {
         seedSalaryLevels();
         seedSystemSettings();
         seedAdminUser();
+        seedRegularUser();
     }
 
     private void seedPermissions() {
@@ -84,9 +85,6 @@ public class DataSeeder implements CommandLineRunner {
         }
     }
 
-    /**
-     * Tự động tạo 3 cấp bậc lương mặc định
-     */
     private void seedSalaryLevels() {
         createSalaryLevelIfNotExists("Cấp 1", 50000, "Lương cơ bản 50.000 VNĐ/giờ");
         createSalaryLevelIfNotExists("Cấp 2", 70000, "Lương cơ bản 70.000 VNĐ/giờ");
@@ -145,6 +143,27 @@ public class DataSeeder implements CommandLineRunner {
 
             userRepository.save(admin);
             log.info("Seeded admin user: {} / 123456", adminPhone);
+        }
+    }
+
+    private void seedRegularUser() {
+        String userPhone = "0123456789";
+        if (userRepository.findByPhoneNumberAndDeletedAtIsNull(userPhone).isEmpty()) {
+            Role userRole = roleRepository.findBySlug("USER")
+                    .orElseThrow(() -> new RuntimeException("Role USER not found"));
+
+            User user = User.builder()
+                    .fullName("PointTrack User")
+                    .phoneNumber(userPhone)
+                    .email("user@pointtrack.com")
+                    .passwordHash(passwordEncoder.encode("123456"))
+                    .status(UserStatus.ACTIVE)
+                    .isFirstLogin(false)
+                    .role(userRole)
+                    .build();
+
+            userRepository.save(user);
+            log.info("Seeded regular user: {} / 123456", userPhone);
         }
     }
 

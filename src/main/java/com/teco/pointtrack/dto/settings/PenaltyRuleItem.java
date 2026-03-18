@@ -20,12 +20,12 @@ import lombok.experimental.FieldDefaults;
 public class PenaltyRuleItem {
 
     /** Số phút muộn tối thiểu để áp mức phạt này (sau grace period) */
-    @NotNull
-    @Min(value = 1, message = "minLateMinutes phải >= 1")
+    @NotNull(message = "Số phút đi muộn không được để trống")
+    @Min(value = 1, message = "Số phút đi muộn tối thiểu phải lớn hơn hoặc bằng 1")
     Integer minLateMinutes;
 
     /** Số công bị trừ. VD: 0.5 = trừ nửa công */
-    @NotNull
-    @DecimalMin(value = "0.1", message = "penaltyShift phải >= 0.1")
+    @NotNull(message = "Mức phạt (số công trừ) không được để trống")
+    @DecimalMin(value = "0.1", message = "Mức phạt (số công trừ) phải lớn hơn hoặc bằng 0.1")
     Double penaltyShift;
 }
