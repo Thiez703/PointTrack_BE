@@ -182,7 +182,7 @@ public class AuthController {
 
     @Operation(summary = "Xem hồ sơ cá nhân")
     @SecurityRequirement(name = "bearerAuth")
-    @GetMapping("/profile")
+    @GetMapping({"/profile", "/me"})
     public ResponseEntity<UserDetail> getProfile() {
         Long userId = AuthUtils.getUserDetail().getId();
         return ResponseEntity.ok(authService.getProfile(userId));
