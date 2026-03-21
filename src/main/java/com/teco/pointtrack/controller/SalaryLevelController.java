@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/v1/salary-levels")
+@RequestMapping({"/salary-levels", "/v1/salary-levels"})
 @RequiredArgsConstructor
 @Tag(name = "Salary Level", description = "Quản lý cấp bậc lương (Cố định 3 cấp bậc)")
 public class SalaryLevelController {

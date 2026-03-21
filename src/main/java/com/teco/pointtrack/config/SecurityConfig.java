@@ -7,9 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.Customizer;
-import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -35,35 +33,36 @@ public class SecurityConfig {
 
     private final CustomAccessDeniedHandler accessDeniedHandler;
     private final JwtUtils jwtUtils;
+    // Lưu ý: Nếu bạn chưa có class JwtAuthenticationEntryPoint thì nó sẽ báo đỏ dòng này nhé
     private final JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
 
     @Value("${app.cors.allowed-origins}")
     private String allowedOriginPatterns;
 
-    /** Các endpoint không cần JWT – căn chỉnh theo prefix /api/v1/ (DC-09) */
+    /** Các endpoint không cần JWT (Context-path /api đã gán ở ngoài) */
     private static final String[] PUBLIC_MATCHERS = {
-            // Auth: chỉ login, forgot password, reset password là public
-            "/api/v1/auth/login",
-            "/api/v1/auth/password/forgot",
-            "/api/v1/auth/password/reset",
-            "/api/v1/auth/token/refresh",
+            // User API Test
+            "/user/getAll",
+
+            // Auth endpoints
+            "/auth/**", "/v1/auth/**",
+
             // Swagger / API docs
-            "/swagger-ui.html",
-            "/swagger-ui/**",
-            "/v3/api-docs/**",
-            "/api-docs/**",
-            "/swagger-resources/**",
-            "/webjars/**",
+            "/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**", "/api-docs/**",
+            "/swagger-resources/**", "/webjars/**",
+
+            // Static Resources
+            "/uploads/**",
+
             // Health check
-            "/actuator/health",
-            "/actuator/info",
+            "/actuator/**"
     };
 
     @Bean
     public SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
-                .cors(Customizer.withDefaults())
+                .cors(Customizer.withDefaults()) // Quan trọng: Bật CORS filter
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .addFilterBefore(new JWTFilter(jwtUtils), UsernamePasswordAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> auth
@@ -78,28 +77,29 @@ public class SecurityConfig {
         return http.build();
     }
 
+    // -------------------------------------------------------------------------
+    // ĐÂY LÀ BEAN PASSWORD ENCODER VỪA ĐƯỢC THÊM VÀO ĐỂ FIX LỖI DATA SEEDER
+    // -------------------------------------------------------------------------
     @Bean
-    public PasswordEncoder defaultPasswordEncoder() {
+    public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
-    }
-
-    @Bean
-    public AuthenticationManager defaultAuthenticationManager(AuthenticationConfiguration config) throws Exception {
-        return config.getAuthenticationManager();
     }
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
 
-        List<String> origins = Arrays.stream(allowedOriginPatterns.split(","))
-                .map(String::trim)
-                .toList();
+        // 1. Chỉ định origin duy nhất (Không dùng *)
+        config.setAllowedOrigins(List.of("http://localhost:3000"));
 
-        config.setAllowedOriginPatterns(origins);
-        config.addAllowedHeader("*");
-        config.addAllowedMethod("*");
+        // 2. Cho phép credentials (để FE gửi kèm cookie/auth header)
         config.setAllowCredentials(true);
+
+        // 3. Cho phép tất cả methods & headers
+        config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
+        config.setAllowedHeaders(List.of("*"));
+
+        config.setMaxAge(3600L); // Cache kết quả Preflight OPTIONS trong 1 tiếng
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);

@@ -37,7 +37,7 @@ import org.springframework.web.bind.annotation.*;
  *   PUT    /api/v1/auth/profile               FR-07 – Sửa hồ sơ
  */
 @RestController
-@RequestMapping("/api/v1/auth")
+@RequestMapping({"/auth", "/v1/auth"})
 @RequiredArgsConstructor
 @Tag(name = "Authentication", description = "Xác thực & Quản lý tài khoản")
 public class AuthController {
@@ -180,9 +180,18 @@ public class AuthController {
     // FR-07: Hồ sơ cá nhân
     // ─────────────────────────────────────────────────────────────────────────
 
+    @Operation(summary = "Lấy thông tin người dùng hiện tại",
+               description = "Trả về thông tin đầy đủ của người dùng đang đăng nhập.")
+    @SecurityRequirement(name = "bearerAuth")
+    @GetMapping("/me")
+    public ResponseEntity<ApiResponse<UserDetail>> getMe() {
+        Long userId = AuthUtils.getUserDetail().getId();
+        return ResponseEntity.ok(ApiResponse.success(authService.getProfile(userId), null));
+    }
+
     @Operation(summary = "Xem hồ sơ cá nhân")
     @SecurityRequirement(name = "bearerAuth")
-    @GetMapping({"/profile", "/me"})
+    @GetMapping("/profile")
     public ResponseEntity<UserDetail> getProfile() {
         Long userId = AuthUtils.getUserDetail().getId();
         return ResponseEntity.ok(authService.getProfile(userId));

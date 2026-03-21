@@ -61,6 +61,16 @@ public class PersonnelService {
     }
 
     @Transactional(readOnly = true)
+    public List<UserDetail> getAllActiveEmployees() {
+        // Tìm tất cả user có role USER (nhân viên) và đang hoạt động
+        return userRepository.findAll().stream()
+                .filter(u -> u.getRole() != null && "USER".equals(u.getRole().getSlug()))
+                .filter(u -> u.getStatus() == UserStatus.ACTIVE && u.getDeletedAt() == null)
+                .map(this::toUserDetail)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
     public UserDetail getEmployeeById(Long id) {
         User user = findActiveUser(id);
         return toUserDetail(user);
@@ -162,8 +172,7 @@ public class PersonnelService {
                 .avatarUrl(user.getAvatarUrl())
                 .gender(user.getGender())
                 .status(user.getStatus())
-                .role(user.getRole() != null ? user.getRole().getSlug() : null)
-                .roleName(user.getRole() != null ? user.getRole().getDisplayName() : null)
+                .role(user.getRole() != null ? new RoleDto(user.getRole()) : null)
                 .salaryLevelId(user.getSalaryLevel() != null ? user.getSalaryLevel().getId() : null)
                 .salaryLevelName(user.getSalaryLevel() != null ? user.getSalaryLevel().getName() : null)
                 .createdAt(user.getCreatedAt())

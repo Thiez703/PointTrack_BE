@@ -17,11 +17,13 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 /**
  * Module PERSONNEL – Quản lý Nhân viên
  */
 @RestController
-@RequestMapping("/api/v1/personnel")
+@RequestMapping({"/personnel", "/v1/personnel"})
 @RequiredArgsConstructor
 @Tag(name = "Personnel", description = "Quản lý Nhân viên")
 @SecurityRequirement(name = "bearerAuth")
@@ -36,6 +38,13 @@ public class PersonnelController {
             @ModelAttribute EmployeePageRequest request) {
         Page<UserDetail> page = personnelService.getEmployees(request);
         return ResponseEntity.ok(ApiResponse.success(page, "Lấy danh sách nhân viên thành công"));
+    }
+
+    @Operation(summary = "Lấy danh sách tất cả nhân viên (không phân trang - dùng cho dropdown)")
+    @GetMapping("/list-all")
+    public ResponseEntity<ApiResponse<List<UserDetail>>> getAllActiveEmployees() {
+        List<UserDetail> list = personnelService.getAllActiveEmployees();
+        return ResponseEntity.ok(ApiResponse.success(list, "Lấy danh sách nhân viên thành công"));
     }
 
     @Operation(summary = "Lấy thông tin nhân viên theo ID")
