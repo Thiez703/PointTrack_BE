@@ -1,18 +1,8 @@
 package com.teco.pointtrack.config;
 
-import com.teco.pointtrack.entity.Permission;
-import com.teco.pointtrack.entity.Role;
-import com.teco.pointtrack.entity.SalaryLevel;
-import com.teco.pointtrack.entity.SystemSetting;
-import com.teco.pointtrack.entity.User;
-import com.teco.pointtrack.entity.enums.PermissionGroup;
-import com.teco.pointtrack.entity.enums.PermissionType;
-import com.teco.pointtrack.entity.enums.UserStatus;
-import com.teco.pointtrack.repository.PermissionRepository;
-import com.teco.pointtrack.repository.RoleRepository;
-import com.teco.pointtrack.repository.SalaryLevelRepository;
-import com.teco.pointtrack.repository.SystemSettingRepository;
-import com.teco.pointtrack.repository.UserRepository;
+import com.teco.pointtrack.entity.*;
+import com.teco.pointtrack.entity.enums.*;
+import com.teco.pointtrack.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
@@ -22,6 +12,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -36,6 +29,9 @@ public class DataSeeder implements CommandLineRunner {
     private final UserRepository userRepository;
     private final SalaryLevelRepository salaryLevelRepository;
     private final SystemSettingRepository systemSettingRepository;
+    private final CustomerRepository customerRepository;
+    private final ShiftTemplateRepository shiftTemplateRepository;
+    private final WorkScheduleRepository workScheduleRepository;
     private final PasswordEncoder passwordEncoder;
 
     @Override
@@ -45,15 +41,77 @@ public class DataSeeder implements CommandLineRunner {
         seedRoles();
         seedSalaryLevels();
         seedSystemSettings();
+
+        // Khởi tạo Admin nhưng không gán ca làm việc
         seedAdminUser();
-        seedRegularUser();
+
+        // Khởi tạo và lấy ra Employee để gán ca làm việc (Test App)
+        User employee = seedEmployeeUser();
+        seedWorkSchedule(employee);
+    }
+
+    private void seedWorkSchedule(User employee) {
+        // 1. Tìm hoặc tạo Khách hàng (Tránh duplicate khi chạy lại code)
+        String customerPhone = "0901234567";
+        Customer customer = customerRepository.findByPhoneNumberAndDeletedAtIsNull(customerPhone)
+                .orElseGet(() -> {
+                    Customer newCustomer = Customer.builder()
+                            .name("Khách hàng Mẫu (Trung tâm Q1)")
+                            .street("72 Lê Thánh Tôn")
+                            .ward("Bến Nghé")
+                            .district("Quận 1")
+                            .city("TP.HCM")
+                            .phoneNumber(customerPhone)
+                            .latitude(10.7782)
+                            .longitude(106.7011)
+                            .isActive(true)
+                            .build();
+                    return customerRepository.save(newCustomer);
+                });
+
+        // 2. Tìm hoặc tạo Ca mẫu (Sáng: 08:00 - 12:00)
+        String shiftName = "Ca Sáng (08:00 - 12:00)";
+        ShiftTemplate shift = shiftTemplateRepository.findByNameAndDeletedAtIsNull(shiftName)
+                .orElseGet(() -> {
+                    ShiftTemplate newShift = ShiftTemplate.builder()
+                            .name(shiftName)
+                            .defaultStart(LocalTime.of(8, 0))
+                            .defaultEnd(LocalTime.of(12, 0))
+                            .durationMinutes(240) // FIX LỖI SQL: 4 tiếng = 240 phút
+                            .shiftType(ShiftType.NORMAL)
+                            .otMultiplier(BigDecimal.valueOf(1.0))
+                            .isActive(true)
+                            .build();
+                    return shiftTemplateRepository.save(newShift);
+                });
+
+        // 3. Đảm bảo Employee này luôn có 1 ca làm việc vào NGÀY HÔM NAY để test Check-in
+        LocalDate today = LocalDate.now();
+        boolean hasScheduleToday = workScheduleRepository.existsByUserIdAndWorkDate(employee.getId(), today);
+
+        if (!hasScheduleToday) {
+            WorkSchedule schedule = WorkSchedule.builder()
+                    .user(employee)
+                    .customer(customer)
+                    .shiftTemplate(shift)
+                    .workDate(today)
+                    .scheduledStart(LocalDateTime.of(today, shift.getDefaultStart()))
+                    .scheduledEnd(LocalDateTime.of(today, shift.getDefaultEnd()))
+                    .status(WorkScheduleStatus.SCHEDULED)
+                    .build();
+            workScheduleRepository.save(schedule);
+
+            log.info(">>>> ĐÃ TẠO LỊCH LÀM VIỆC MẪU CHO NHÂN VIÊN ({}) VÀO HÔM NAY ({}).",
+                    employee.getPhoneNumber(), today);
+            log.info(">>>> Bạn có thể dùng workScheduleId = {} để test Check-in.", schedule.getId());
+        }
     }
 
     private void seedPermissions() {
-        createPermissionIfNotExists("USER_READ",    "Xem danh sách người dùng", PermissionGroup.ADMINISTRATION, PermissionType.ACTION);
-        createPermissionIfNotExists("USER_MANAGE",  "Quản lý người dùng",       PermissionGroup.ADMINISTRATION, PermissionType.ACTION);
-        createPermissionIfNotExists("ROLE_READ",    "Xem danh sách vai trò",    PermissionGroup.ADMINISTRATION, PermissionType.ACTION);
-        createPermissionIfNotExists("ROLE_MANAGE",  "Quản lý vai trò",          PermissionGroup.ADMINISTRATION, PermissionType.ACTION);
+        createPermissionIfNotExists("USER_READ",    "Xem danh sách người dùng");
+        createPermissionIfNotExists("USER_MANAGE",  "Quản lý người dùng");
+        createPermissionIfNotExists("ROLE_READ",    "Xem danh sách vai trò");
+        createPermissionIfNotExists("ROLE_MANAGE",  "Quản lý vai trò");
     }
 
     private void seedRoles() {
@@ -85,6 +143,9 @@ public class DataSeeder implements CommandLineRunner {
         }
     }
 
+    /**
+     * Tự động tạo 3 cấp bậc lương mặc định
+     */
     private void seedSalaryLevels() {
         createSalaryLevelIfNotExists("Cấp 1", 50000, "Lương cơ bản 50.000 VNĐ/giờ");
         createSalaryLevelIfNotExists("Cấp 2", 70000, "Lương cơ bản 70.000 VNĐ/giờ");
@@ -112,6 +173,10 @@ public class DataSeeder implements CommandLineRunner {
         createSettingIfNotExists("PENALTY_RULES",
                 "[{\"minLateMinutes\":15,\"penaltyShift\":0.5},{\"minLateMinutes\":30,\"penaltyShift\":1.0}]",
                 "Bậc thang trừ công khi check-in muộn (BR-12)");
+        createSettingIfNotExists("GPS_RADIUS_METERS", "50",
+                "Bán kính GPS fencing cho phép check-in (meters) — BR-14");
+        createSettingIfNotExists("LATE_CHECKOUT_THRESHOLD_MINUTES", "30",
+                "Số phút checkout quá giờ kết thúc ca bắt buộc nhập lý do — BR-16.2");
         log.info("Seeded system settings");
     }
 
@@ -125,55 +190,64 @@ public class DataSeeder implements CommandLineRunner {
         }
     }
 
-    private void seedAdminUser() {
+    private User seedAdminUser() {
         String adminPhone = "0987654321";
-        if (userRepository.findByPhoneNumberAndDeletedAtIsNull(adminPhone).isEmpty()) {
-            Role adminRole = roleRepository.findBySlug("ADMIN")
-                    .orElseThrow(() -> new RuntimeException("Role ADMIN not found"));
-
-            User admin = User.builder()
-                    .fullName("PointTrack Admin")
-                    .phoneNumber(adminPhone)
-                    .email("admin@pointtrack.com")
-                    .passwordHash(passwordEncoder.encode("123456"))
-                    .status(UserStatus.ACTIVE)
-                    .isFirstLogin(false)
-                    .role(adminRole)
-                    .build();
-
-            userRepository.save(admin);
-            log.info("Seeded admin user: {} / 123456", adminPhone);
+        var existing = userRepository.findByPhoneNumberAndDeletedAtIsNull(adminPhone);
+        if (existing.isPresent()) {
+            return existing.get();
         }
+
+        Role adminRole = roleRepository.findBySlug("ADMIN")
+                .orElseThrow(() -> new RuntimeException("Role ADMIN not found"));
+
+        User admin = User.builder()
+                .fullName("PointTrack Admin")
+                .phoneNumber(adminPhone)
+                .email("admin@pointtrack.com")
+                .passwordHash(passwordEncoder.encode("123456"))
+                .status(UserStatus.ACTIVE)
+                .isFirstLogin(false)
+                .role(adminRole)
+                .build();
+
+        User saved = userRepository.save(admin);
+        log.info("Seeded admin user: {} / 123456", adminPhone);
+        return saved;
     }
 
-    private void seedRegularUser() {
-        String userPhone = "0123456789";
-        if (userRepository.findByPhoneNumberAndDeletedAtIsNull(userPhone).isEmpty()) {
-            Role userRole = roleRepository.findBySlug("USER")
-                    .orElseThrow(() -> new RuntimeException("Role USER not found"));
-
-            User user = User.builder()
-                    .fullName("PointTrack User")
-                    .phoneNumber(userPhone)
-                    .email("user@pointtrack.com")
-                    .passwordHash(passwordEncoder.encode("123456"))
-                    .status(UserStatus.ACTIVE)
-                    .isFirstLogin(false)
-                    .role(userRole)
-                    .build();
-
-            userRepository.save(user);
-            log.info("Seeded regular user: {} / 123456", userPhone);
+    // Đổi kiểu trả về thành User để lấy dữ liệu gán vào hàm tạo Ca
+    private User seedEmployeeUser() {
+        String employeePhone = "0123456789";
+        var existing = userRepository.findByPhoneNumberAndDeletedAtIsNull(employeePhone);
+        if (existing.isPresent()) {
+            return existing.get();
         }
+
+        Role userRole = roleRepository.findBySlug("USER")
+                .orElseThrow(() -> new RuntimeException("Role USER not found"));
+
+        User employee = User.builder()
+                .fullName("Employee Test")
+                .phoneNumber(employeePhone)
+                .email("employee@pointtrack.com")
+                .passwordHash(passwordEncoder.encode("123456"))
+                .status(UserStatus.ACTIVE)
+                .isFirstLogin(false)
+                .role(userRole)
+                .build();
+
+        User saved = userRepository.save(employee);
+        log.info("Seeded employee user: {} / 123456", employeePhone);
+        return saved;
     }
 
-    private void createPermissionIfNotExists(String code, String name, PermissionGroup group, PermissionType type) {
+    private void createPermissionIfNotExists(String code, String name) {
         if (permissionRepository.findByCode(code).isEmpty()) {
             Permission permission = Permission.builder()
                     .code(code)
                     .name(name)
-                    .groupName(group)
-                    .type(type)
+                    .groupName(PermissionGroup.ADMINISTRATION)
+                    .type(PermissionType.ACTION)
                     .build();
             permissionRepository.save(permission);
         }

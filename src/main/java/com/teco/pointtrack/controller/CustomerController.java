@@ -29,7 +29,7 @@ import org.springframework.web.bind.annotation.*;
  *   DELETE /api/v1/customers/{id}   — Xoá khách hàng (soft delete)
  */
 @RestController
-@RequestMapping("/api/v1/customers")
+@RequestMapping({"/customers", "/v1/customers"})
 @RequiredArgsConstructor
 @Tag(name = "Customer", description = "Quản lý Khách hàng")
 @SecurityRequirement(name = "bearerAuth")

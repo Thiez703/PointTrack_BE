@@ -1,8 +1,6 @@
 spring:
   application:
     name: pointtrack
-  profiles:
-    active: dev
 
   # DATABASE (MySQL)
   datasource:

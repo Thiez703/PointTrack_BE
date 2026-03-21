@@ -17,6 +17,8 @@ public interface ShiftTemplateRepository extends JpaRepository<ShiftTemplate, Lo
 
     boolean existsByNameAndIdNotAndDeletedAtIsNull(String name, Long id);
 
+    Optional<ShiftTemplate> findByNameAndDeletedAtIsNull(String name);
+
     List<ShiftTemplate> findAllByDeletedAtIsNullOrderByDefaultStartAsc();
 
     List<ShiftTemplate> findAllByShiftTypeAndDeletedAtIsNullOrderByDefaultStartAsc(ShiftType shiftType);

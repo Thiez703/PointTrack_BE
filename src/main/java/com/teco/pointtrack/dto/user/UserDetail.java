@@ -28,8 +28,7 @@ public class UserDetail implements Serializable {
     String avatarUrl;
     Gender gender;
     UserStatus status;
-    String role;
-    String roleName;
+    RoleDto role;
     
     // Thông tin cấp bậc lương
     Long salaryLevelId;

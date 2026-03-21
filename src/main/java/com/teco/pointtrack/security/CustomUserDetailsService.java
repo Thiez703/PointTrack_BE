@@ -42,8 +42,7 @@ public class CustomUserDetailsService implements UserDetailsService {
                 .status(user.getStatus())
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
-                .role(user.getRole() != null ? user.getRole().getSlug() : null)
-                .roleName(user.getRole() != null ? user.getRole().getDisplayName() : null)
+                .role(user.getRole() != null ? new RoleDto(user.getRole()) : null)
                 .build();
 
         // BR-22: ACTIVE = enabled, INACTIVE = disabled

@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/v1/scheduling/shift-templates")
+@RequestMapping({"/scheduling/shift-templates", "/v1/scheduling/shift-templates"})
 @RequiredArgsConstructor
 @Tag(name = "Shift Template", description = "Quản lý ca mẫu (Shift Template) – CRUD ca cứng")
 public class ShiftTemplateController {
