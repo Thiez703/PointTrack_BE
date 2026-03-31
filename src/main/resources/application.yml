@@ -2,12 +2,17 @@ spring:
   application:
     name: pointtrack
   profiles:
-    active: dev
+    active: dev,local
   jackson:
     serialization:
       write-dates-as-timestamps: false
     deserialization:
       fail-on-unknown-properties: false
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 10MB
+      max-request-size: 15MB
 
 server:
   port: 8080

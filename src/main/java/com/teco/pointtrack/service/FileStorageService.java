@@ -39,12 +39,29 @@ public class FileStorageService {
      * @return Full URL có thể truy cập từ client
      */
     public String storeAttendancePhoto(MultipartFile file) {
+        return storeFile(file, "attendance");
+    }
+
+    /**
+     * Upload file tạm thời (avatar, tài liệu...).
+     * Lưu vào: {uploadDir}/tmp/{year}/{month}/{day}/
+     *
+     * @return Full URL có thể truy cập từ client
+     */
+    public String storeTmpFile(MultipartFile file) {
+        validateFile(file);
+        return storeFile(file, "tmp");
+    }
+
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    private String storeFile(MultipartFile file, String category) {
         try {
-            String ext        = getExtension(file.getOriginalFilename());
-            String fileName   = UUID.randomUUID() + ext;
-            LocalDate today   = LocalDate.now();
-            String subPath    = "attendance/%d/%02d/%02d".formatted(
-                    today.getYear(), today.getMonthValue(), today.getDayOfMonth());
+            String ext      = getExtension(file.getOriginalFilename());
+            String fileName = UUID.randomUUID() + ext;
+            LocalDate today = LocalDate.now();
+            String subPath  = "%s/%d/%02d/%02d".formatted(
+                    category, today.getYear(), today.getMonthValue(), today.getDayOfMonth());
 
             Path targetDir = Paths.get(uploadDir, subPath);
             Files.createDirectories(targetDir);
@@ -52,11 +69,20 @@ public class FileStorageService {
             Path targetPath = targetDir.resolve(fileName);
             Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
 
-            // Trả về URL đầy đủ để FE có thể hiển thị
-            return baseUrl + "/uploads/" + subPath + "/" + fileName;
+            return baseUrl + "/api/uploads/" + subPath + "/" + fileName;
 
         } catch (IOException e) {
-            throw new RuntimeException("Không thể lưu file ảnh: " + e.getMessage(), e);
+            throw new RuntimeException("Không thể lưu file: " + e.getMessage(), e);
+        }
+    }
+
+    private void validateFile(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("File không được rỗng");
+        }
+        String ext = getExtension(file.getOriginalFilename()).toLowerCase();
+        if (!java.util.Set.of(".jpg", ".jpeg", ".png", ".webp", ".gif").contains(ext)) {
+            throw new IllegalArgumentException("Chỉ chấp nhận file ảnh: jpg, jpeg, png, webp, gif");
         }
     }
 

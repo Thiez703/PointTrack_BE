@@ -70,6 +70,7 @@ public class ShiftTemplateService {
                 .shiftType(request.getShiftType())
                 .color(request.getColor() != null ? request.getColor() : "#4CAF50")
                 .otMultiplier(request.getOtMultiplier())
+                .notes(request.getNotes())
                 .build();
 
         ShiftTemplate saved = shiftTemplateRepository.save(template);
@@ -103,6 +104,7 @@ public class ShiftTemplateService {
         template.setShiftType(request.getShiftType());
         template.setColor(request.getColor() != null ? request.getColor() : template.getColor());
         template.setOtMultiplier(request.getOtMultiplier());
+        template.setNotes(request.getNotes());
 
         shiftTemplateRepository.save(template);
         log.info("Updated shift template: id={}, name={}", template.getId(), template.getName());
@@ -118,6 +120,12 @@ public class ShiftTemplateService {
     @Transactional
     public void delete(Long id) {
         ShiftTemplate template = findActive(id);
+
+        // BR TEMPLATE_IN_USE: không được xoá nếu template đang được dùng
+        if (shiftTemplateRepository.isUsedByActiveShifts(id)
+                || shiftTemplateRepository.isUsedByActivePackages(id)) {
+            throw new ConflictException("TEMPLATE_IN_USE: Ca mẫu đang được dùng bởi ca hoặc gói chưa huỷ, không thể xoá");
+        }
 
         template.setDeletedAt(LocalDateTime.now());
         template.setIsActive(false);
@@ -171,6 +179,7 @@ public class ShiftTemplateService {
                 .id(t.getId())
                 .name(t.getName())
                 .durationMinutes(t.getDurationMinutes())
+                .notes(t.getNotes())
                 .defaultStart(t.getDefaultStart())
                 .defaultEnd(t.getDefaultEnd())
                 .shiftType(t.getShiftType())

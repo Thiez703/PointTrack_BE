@@ -8,6 +8,7 @@ import com.teco.pointtrack.entity.enums.UserStatus;
 import java.io.Serializable;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
@@ -28,6 +29,8 @@ public class UserDetail implements Serializable {
     String avatarUrl;
     Gender gender;
     UserStatus status;
+    String area;
+    List<String> skills;
     RoleDto role;
     
     // Thông tin cấp bậc lương

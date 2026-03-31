@@ -76,7 +76,7 @@ public class OpenApiConfig {
     public GroupedOpenApi schedulingApi() {
         return GroupedOpenApi.builder()
                 .group("3. Scheduling")
-                .pathsToMatch("/scheduling/**", "/v1/scheduling/**")
+                .pathsToMatch("/v1/shifts/**", "/v1/shift-templates/**", "/v1/packages/**")
                 .build();
     }
 }

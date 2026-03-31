@@ -4,12 +4,14 @@ import com.teco.pointtrack.common.AuthUtils;
 import com.teco.pointtrack.dto.attendance.*;
 import com.teco.pointtrack.dto.common.ApiResponse;
 import com.teco.pointtrack.dto.common.MessageResponse;
+import com.teco.pointtrack.entity.enums.AttendanceStatus;
 import com.teco.pointtrack.service.AttendanceService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -17,16 +19,40 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @RestController
-@RequestMapping({"/attendance", "/v1/attendance"})
+@RequestMapping("/v1/attendance")
 @RequiredArgsConstructor
 @SecurityRequirement(name = "bearerAuth")
 @Tag(name = "Attendance", description = "Chấm công — Check-in/Check-out & Giải trình")
 public class AttendanceController {
 
     private final AttendanceService attendanceService;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // [Admin] Danh sách bản ghi chấm công có phân trang
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Operation(
+        summary = "[Admin] Danh sách bản ghi chấm công",
+        description = "Trả về danh sách bản ghi chấm công có phân trang. Tất cả filter đều optional."
+    )
+    @PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/records")
+    public ResponseEntity<ApiResponse<Page<AttendanceRecordResponse>>> getRecords(
+            @RequestParam(required = false) Long employeeId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(required = false) AttendanceStatus status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        Page<AttendanceRecordResponse> data = attendanceService.getAttendanceRecords(
+                employeeId, startDate, endDate, status, page, size);
+        return ResponseEntity.ok(ApiResponse.success(data, "Lấy danh sách bản ghi chấm công thành công"));
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // BR-14 + BR-15 + BR-16: Check-in

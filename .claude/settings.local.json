@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mvn compile:*)",
+      "Bash(./mvnw compile:*)",
+      "Bash(./mvnw.cmd compile:*)",
+      "Bash(./mvnw.cmd spring-boot:run)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill:*)",
+      "Bash(find /d/ThiezDuAn -maxdepth 2 -type d -name *FE* -o -name *frontend* -o -name *client*)",
+      "Bash(ls -la /d/ThiezDuAn/PointTrack_FE/*.json /d/ThiezDuAn/PointTrack_FE/*.js /d/ThiezDuAn/PointTrack_FE/*.ts)",
+      "Bash(npm install:*)",
+      "Bash(ls /d/ThiezDuAn/PointTrack_FE/.env*)",
+      "Bash(xargs grep:*)",
+      "Bash(xargs cat:*)",
+      "Bash(/dev/null find:*)",
+      "Bash(/dev/null ls:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(ls /d/ThiezDuAn/PointTrack_FE/node_modules/leaflet/dist/*.css)",
+      "Bash(xargs head:*)",
+      "Bash(./mvnw.cmd test:*)",
+      "Bash(rm \"D:/ThiezDuAn/PointTrack_BE/src/main/java/com/teco/pointtrack/service/PersonnelService.java\")",
+      "Bash(rm \"D:/ThiezDuAn/PointTrack_BE/src/main/java/com/teco/pointtrack/dto/personnel/EmployeePageRequest.java\")",
+      "Bash(rm \"D:/ThiezDuAn/PointTrack_BE/src/main/java/com/teco/pointtrack/dto/personnel/UpdateEmployeeRequest.java\")",
+      "Bash(rm \"D:/ThiezDuAn/PointTrack_BE/src/main/java/com/teco/pointtrack/dto/customer/CustomerRequest.java\")",
+      "Bash(sed -n '23p' \"D:/ThiezDuAn/PointTrack_BE/src/main/java/com/teco/pointtrack/controller/AttendanceController.java\")",
+      "Bash(sed -n '30p' \"D:/ThiezDuAn/PointTrack_BE/src/main/java/com/teco/pointtrack/controller/CustomerController.java\")",
+      "Bash(sed -n '15p' \"D:/ThiezDuAn/PointTrack_BE/src/main/java/com/teco/pointtrack/controller/UserController.java\")",
+      "Bash(sed -n '18p' \"D:/ThiezDuAn/PointTrack_BE/src/main/java/com/teco/pointtrack/controller/ServicePackageController.java\")",
+      "Bash(sed -n '19p' \"D:/ThiezDuAn/PointTrack_BE/src/main/java/com/teco/pointtrack/controller/SalaryLevelController.java\")",
+      "Bash(ls:*)"
+    ]
+  }
+}

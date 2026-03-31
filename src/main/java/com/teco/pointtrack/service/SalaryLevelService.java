@@ -112,8 +112,10 @@ public class SalaryLevelService {
         SalaryLevel level = findActiveLevel(id);
 
         // Kiểm tra có nhân viên nào đang dùng level này không
-        if (userRepository.existsBySalaryLevelIdAndDeletedAtIsNull(id)) {
-            throw new BadRequestException("SALARY_LEVEL_IN_USE");
+        long inUseCount = userRepository.countBySalaryLevelId(id);
+        if (inUseCount > 0) {
+            throw new BadRequestException(
+                    "Level đang được sử dụng bởi " + inUseCount + " nhân viên");
         }
 
         // BR-22: soft delete
@@ -169,9 +171,6 @@ public class SalaryLevelService {
                 .build();
     }
 
-    /**
-     * Map entity User → DTO UserDetail (tương tự PersonnelService)
-     */
     private UserDetail toUserDetail(User user) {
         return UserDetail.builder()
                 .id(user.getId())

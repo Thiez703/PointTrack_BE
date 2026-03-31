@@ -46,4 +46,6 @@ public class ShiftTemplateRequest {
     @DecimalMin(value = "1.0", message = "Hệ số OT phải >= 1.0")
     @DecimalMax(value = "3.0", message = "Hệ số OT phải <= 3.0")
     BigDecimal otMultiplier;
+
+    String notes;
 }

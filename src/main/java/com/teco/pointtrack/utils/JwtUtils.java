@@ -75,7 +75,7 @@ public class JwtUtils {
         try {
             parseClaimsFromToken(token);
             return !isTokenExpired(token) && !isTokenRevoked(token);
-        } catch (JwtException e) {
+        } catch (Exception e) {
             return false;
         }
     }
@@ -90,14 +90,20 @@ public class JwtUtils {
     }
 
     public void revokeToken(String token) {
-        if (token != null && validateToken(token)) {
+        if (token == null || !validateToken(token)) {
+            // Token null, hết hạn, hoặc không hợp lệ → không cần revoke, bỏ qua
+            return;
+        }
+        try {
             Claims claims = parseClaimsFromToken(token);
             long remainingTime = claims.getExpiration().getTime() - System.currentTimeMillis();
             if (remainingTime > 0) {
                 redisTemplate.opsForValue().set(TOKEN_PREFIX + token, "revoked", remainingTime, TimeUnit.MILLISECONDS);
             }
-        } else {
-            throw new CustomAuthenticationException("Token không hợp lệ");
+        } catch (Exception e) {
+            // Redis down hoặc lỗi khác → log nhưng không block logout
+            org.slf4j.LoggerFactory.getLogger(JwtUtils.class)
+                    .warn("Không thể revoke token trên Redis: {}", e.getMessage());
         }
     }
 

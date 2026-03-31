@@ -10,6 +10,9 @@ import com.teco.pointtrack.repository.*;
 import com.teco.pointtrack.utils.GpsUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -447,22 +450,7 @@ public class AttendanceService {
         Double lng = schedule.getLongitude();
 
         if ((addr == null || addr.isBlank()) && schedule.getCustomer() != null) {
-            Customer c = schedule.getCustomer();
-            StringBuilder sb = new StringBuilder();
-            if (c.getStreet() != null && !c.getStreet().isBlank()) sb.append(c.getStreet());
-            if (c.getWard() != null && !c.getWard().isBlank()) {
-                if (!sb.isEmpty()) sb.append(", ");
-                sb.append(c.getWard());
-            }
-            if (c.getDistrict() != null && !c.getDistrict().isBlank()) {
-                if (!sb.isEmpty()) sb.append(", ");
-                sb.append(c.getDistrict());
-            }
-            if (c.getCity() != null && !c.getCity().isBlank()) {
-                if (!sb.isEmpty()) sb.append(", ");
-                sb.append(c.getCity());
-            }
-            addr = !sb.isEmpty() ? sb.toString() : null;
+            addr = schedule.getCustomer().getAddress();
         }
         if (lat == null && schedule.getCustomer() != null) {
             lat = schedule.getCustomer().getLatitude();
@@ -546,5 +534,66 @@ public class AttendanceService {
 
     private String str(Object val) {
         return val == null ? null : val.toString();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // GET /v1/attendance/records — Admin xem danh sách bản ghi chấm công
+    // ═════════════════════════════════════════════════════════════════════════
+
+    @Transactional(readOnly = true)
+    public Page<AttendanceRecordResponse> getAttendanceRecords(
+            Long employeeId,
+            LocalDate startDate,
+            LocalDate endDate,
+            AttendanceStatus status,
+            int page,
+            int size) {
+
+        LocalDateTime startDt = (startDate != null) ? startDate.atStartOfDay() : null;
+        LocalDateTime endDt   = (endDate   != null) ? endDate.plusDays(1).atStartOfDay() : null;
+
+        Pageable pageable = PageRequest.of(page, size);
+        Page<AttendanceRecord> records = attendanceRecordRepo.findByFilters(
+                employeeId, startDt, endDt, status, pageable);
+
+        return records.map(this::toAttendanceRecordResponse);
+    }
+
+    private AttendanceRecordResponse toAttendanceRecordResponse(AttendanceRecord a) {
+        WorkSchedule ws = a.getWorkSchedule();
+
+        Long customerId     = null;
+        String customerName = null;
+        LocalDate shiftDate = null;
+
+        if (ws != null) {
+            shiftDate = ws.getWorkDate();
+            if (ws.getCustomer() != null) {
+                customerId   = ws.getCustomer().getId();
+                customerName = ws.getCustomer().getName();
+            }
+        }
+
+        Long explanationId = explanationRepo.findByAttendanceRecordId(a.getId())
+                .stream()
+                .findFirst()
+                .map(ExplanationRequest::getId)
+                .orElse(null);
+
+        return AttendanceRecordResponse.builder()
+                .id(a.getId())
+                .employeeId(a.getUser() != null ? a.getUser().getId() : null)
+                .employeeName(a.getUser() != null ? a.getUser().getFullName() : null)
+                .customerId(customerId)
+                .customerName(customerName)
+                .shiftDate(shiftDate)
+                .checkInTime(a.getCheckInTime())
+                .checkOutTime(a.getCheckOutTime())
+                .status(a.getStatus())
+                .lateMinutes(a.getLateMinutes())
+                .earlyLeaveMinutes(a.getEarlyLeaveMinutes())
+                .distanceMeters(a.getCheckInDistanceMeters())
+                .explanationId(explanationId)
+                .build();
     }
 }

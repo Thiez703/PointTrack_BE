@@ -25,6 +25,20 @@ spring:
       host: localhost
       port: 6379
 
+  # Mail (SMTP) – gửi mật khẩu tạm cho nhân viên mới
+  # Nếu chưa cấu hình SMTP → chỉ log warning, không crash app
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
   main:
     allow-bean-definition-overriding: true
 
@@ -44,10 +58,10 @@ springdoc:
   api-docs:
     path: /api-docs
   swagger-ui:
-    path: /swagger-ui.html
     operationsSorter: alpha
     tagsSorter: alpha
     display-request-duration: true
+    custom-css-url: /swagger-custom.css
 
 app:
   cors:
@@ -58,6 +72,8 @@ app:
   google:
     client-id: ${GOOGLE_CLIENT_ID:}
     maps-api-key: ${GOOGLE_MAPS_API_KEY:}
+  shift:
+    geofence-radius-meters: ${GEOFENCE_RADIUS_METERS:100}
   cookie:
     secure: false
     same-site: Lax

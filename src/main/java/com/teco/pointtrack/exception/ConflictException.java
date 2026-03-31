@@ -1,15 +1,17 @@
 package com.teco.pointtrack.exception;
 
 import com.teco.pointtrack.utils.MessagesUtils;
-import lombok.Setter;
+import lombok.Getter;
 
-@Setter
+@Getter
 public class ConflictException extends RuntimeException {
 
+    private final String errorCode;
     private String message;
 
-    public ConflictException(String errorCode, Object... var2) {
-        this.message = MessagesUtils.getMessage(errorCode, var2);
+    public ConflictException(String errorCode, Object... args) {
+        this.errorCode = errorCode;
+        this.message   = MessagesUtils.getMessage(errorCode, args);
     }
 
     @Override

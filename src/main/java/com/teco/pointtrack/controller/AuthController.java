@@ -37,7 +37,7 @@ import org.springframework.web.bind.annotation.*;
  *   PUT    /api/v1/auth/profile               FR-07 – Sửa hồ sơ
  */
 @RestController
-@RequestMapping({"/auth", "/v1/auth"})
+@RequestMapping({"/v1/auth", "/auth"})
 @RequiredArgsConstructor
 @Tag(name = "Authentication", description = "Xác thực & Quản lý tài khoản")
 public class AuthController {
@@ -104,19 +104,29 @@ public class AuthController {
     // ─────────────────────────────────────────────────────────────────────────
 
     @Operation(summary = "Quên mật khẩu",
-               description = "Gửi email chứa link reset MK (token hết hạn 15 phút). " +
-                             "Luôn trả 200 để tránh tiết lộ email có tồn tại không.")
+               description = "Gửi OTP 6 chữ số qua SMS (hết hạn 15 phút). " +
+                             "Luôn trả 200 để tránh tiết lộ số điện thoại có tồn tại không.")
     @PostMapping("/password/forgot")
     public ResponseEntity<MessageResponse> forgotPassword(
             @Valid @RequestBody ForgotPasswordRequest request) {
 
         authService.forgotPassword(request);
         return ResponseEntity.ok(
-                new MessageResponse("Nếu email tồn tại trong hệ thống, hướng dẫn đặt lại mật khẩu đã được gửi."));
+                new MessageResponse("Nếu số điện thoại tồn tại trong hệ thống, mã OTP đã được gửi qua SMS."));
+    }
+
+    @Operation(summary = "Xác thực OTP",
+               description = "Kiểm tra mã OTP gửi qua SMS. Nếu hợp lệ, trả về reset token để đặt lại mật khẩu.")
+    @PostMapping("/password/verify-otp")
+    public ResponseEntity<ApiResponse<VerifyOtpResponse>> verifyOtp(
+            @Valid @RequestBody VerifyOtpRequest request) {
+
+        VerifyOtpResponse result = authService.verifyOtp(request);
+        return ResponseEntity.ok(ApiResponse.success(result, result.getMessage()));
     }
 
     @Operation(summary = "Đặt lại mật khẩu",
-               description = "Xác thực reset token và cập nhật MK mới. Token chỉ dùng được 1 lần.")
+               description = "Xác thực reset token (nhận được sau verify-otp) và cập nhật MK mới.")
     @PutMapping("/password/reset")
     public ResponseEntity<MessageResponse> resetPassword(
             @Valid @RequestBody ResetPasswordRequest request) {
@@ -146,13 +156,20 @@ public class AuthController {
 
     @Operation(summary = "Làm mới token",
                description = "Dùng refresh token để lấy access token mới. " +
-                             "Refresh token cũ bị vô hiệu (rotation).")
+                             "Refresh token cũ bị vô hiệu (rotation). " +
+                             "Nếu không gửi body, tự động đọc refreshToken từ cookie.")
     @PostMapping("/token/refresh")
     public ResponseEntity<AuthResponse> refreshToken(
-            @RequestBody TokenRefreshRequest request,
+            @RequestBody(required = false) TokenRefreshRequest request,
+            HttpServletRequest httpRequest,
             HttpServletResponse response) {
 
-        AuthResponse authResponse = authService.refreshToken(request);
+        // Ưu tiên body; fallback về cookie (httpOnly — JS không thể đọc)
+        String refreshToken = (request != null && request.getRefreshToken() != null)
+                ? request.getRefreshToken()
+                : extractCookieToken(httpRequest, CookieUtils.REFRESH_TOKEN_COOKIE_NAME);
+
+        AuthResponse authResponse = authService.refreshToken(new TokenRefreshRequest(refreshToken));
         cookieUtils.setAuthCookies(response, authResponse.getAccessToken(), authResponse.getRefreshToken());
         return ResponseEntity.ok(authResponse);
     }
@@ -185,8 +202,11 @@ public class AuthController {
     @SecurityRequirement(name = "bearerAuth")
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<UserDetail>> getMe() {
-        Long userId = AuthUtils.getUserDetail().getId();
-        return ResponseEntity.ok(ApiResponse.success(authService.getProfile(userId), null));
+        com.teco.pointtrack.dto.user.UserDetail userDetail = AuthUtils.getUserDetail();
+        if (userDetail == null) {
+            throw new com.teco.pointtrack.exception.SignInRequiredException("SIGN_IN_REQUIRED");
+        }
+        return ResponseEntity.ok(ApiResponse.success(authService.getProfile(userDetail.getId()), null));
     }
 
     @Operation(summary = "Xem hồ sơ cá nhân")

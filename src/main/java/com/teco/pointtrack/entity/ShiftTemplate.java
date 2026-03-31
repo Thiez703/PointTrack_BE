@@ -60,6 +60,10 @@ public class ShiftTemplate extends BaseEntity {
     @Builder.Default
     Boolean isActive = true;
 
+    /** Ghi chú thêm */
+    @Column(columnDefinition = "TEXT")
+    String notes;
+
     /** BR-22: soft delete */
     @Column(name = "deleted_at")
     LocalDateTime deletedAt;

@@ -18,7 +18,8 @@ import com.teco.pointtrack.security.CustomUserDetailsService;
 import com.teco.pointtrack.utils.JwtUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,18 +28,23 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.Optional;
+import java.util.Random;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class AuthService {
+
+    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final SalaryLevelRepository salaryLevelRepository;
     private final PasswordEncoder passwordEncoder;
     private final CaptchaService captchaService;
+    private final SmsService smsService;
+    private final PasswordService passwordService;
     private final JwtUtils jwtUtils;
     private final CustomUserDetailsService userDetailsService;
     private static final String ROLE_USER  = "USER";
@@ -46,9 +52,31 @@ public class AuthService {
 
     @Transactional
     public UserDetail createEmployeeAccount(CreateEmployeeRequest request) {
+        String phone = request.getPhoneNumber().trim();
+        String email = (request.getEmail() != null) ? request.getEmail().trim().toLowerCase() : null;
 
-        if (userRepository.findByPhoneNumberAndDeletedAtIsNull(request.getPhoneNumber()).isPresent()) {
-            throw new ConflictException("Số điện thoại đã được sử dụng");
+        // 1. Kiểm tra phone
+        Optional<User> existingUserByPhone = userRepository.findByPhoneNumber(phone);
+        if (existingUserByPhone.isPresent()) {
+            User user = existingUserByPhone.get();
+            if (user.getDeletedAt() == null) {
+                throw new ConflictException("Số điện thoại đã được sử dụng bởi một nhân viên khác");
+            }
+            // Nếu đã xóa -> Reactivate
+            return reactivateEmployee(user, request);
+        }
+
+        // 2. Kiểm tra email (nếu có)
+        if (email != null) {
+            Optional<User> existingUserByEmail = userRepository.findByEmail(email);
+            if (existingUserByEmail.isPresent()) {
+                User user = existingUserByEmail.get();
+                if (user.getDeletedAt() == null) {
+                    throw new ConflictException("Email đã được sử dụng bởi một nhân viên khác");
+                }
+                // Nếu đã xóa -> Reactivate
+                return reactivateEmployee(user, request);
+            }
         }
 
         String tempPassword = generateTempPassword();
@@ -67,8 +95,8 @@ public class AuthService {
 
         User newUser = User.builder()
                 .fullName(request.getFullName().trim())
-                .email(request.getEmail() != null ? request.getEmail().trim().toLowerCase() : null)
-                .phoneNumber(request.getPhoneNumber())
+                .email(email)
+                .phoneNumber(phone)
                 .passwordHash(passwordEncoder.encode(tempPassword))
                 .status(UserStatus.ACTIVE)
                 .isFirstLogin(true)
@@ -82,6 +110,39 @@ public class AuthService {
             newUser.getPhoneNumber(), tempPassword, (salaryLevel != null ? salaryLevel.getName() : "Chưa gán"));
 
         return mapToUserDetail(newUser);
+    }
+
+    private UserDetail reactivateEmployee(User user, CreateEmployeeRequest request) {
+        String tempPassword = generateTempPassword();
+
+        var userRole = roleRepository.findBySlug(ROLE_USER)
+                .orElseThrow(() -> new BadRequestException("Cấu hình lỗi: Role USER chưa được tạo"));
+
+        SalaryLevel salaryLevel = salaryLevelRepository.findByNameAndDeletedAtIsNull("Cấp 1")
+                .orElseThrow(() -> new BadRequestException("Hệ thống chưa khởi tạo cấp bậc lương: Cấp 1"));
+
+        LocalDate startDate = null;
+        if (request.getStartDate() != null && !request.getStartDate().isBlank()) {
+            startDate = parseDate(request.getStartDate());
+        }
+
+        // Reset data cho user cũ
+        user.setFullName(request.getFullName().trim());
+        user.setEmail(request.getEmail() != null ? request.getEmail().trim().toLowerCase() : null);
+        user.setPhoneNumber(request.getPhoneNumber()); // Cập nhật lại phone (đề phòng)
+        user.setPasswordHash(passwordEncoder.encode(tempPassword));
+        user.setStatus(UserStatus.ACTIVE);
+        user.setFirstLogin(true);
+        user.setDeletedAt(null);
+        user.setStartDate(startDate);
+        user.setRole(userRole);
+        user.setSalaryLevel(salaryLevel);
+
+        userRepository.save(user);
+        log.info("[DEV] Tài khoản cũ được khôi phục: SĐT={} | MK tạm={}", 
+            user.getPhoneNumber(), tempPassword);
+
+        return mapToUserDetail(user);
     }
 
     @Transactional
@@ -156,14 +217,44 @@ public class AuthService {
 
     @Transactional
     public void forgotPassword(ForgotPasswordRequest request) {
-        String email = request.getEmail().trim().toLowerCase();
-        userRepository.findByEmailAndDeletedAtIsNull(email).ifPresent(user -> {
-            String token = UUID.randomUUID().toString();
-            user.setResetPasswordToken(token);
-            user.setResetTokenExpiredAt(LocalDateTime.now().plusMinutes(15));
+        String phone = request.getPhoneNumber().trim();
+        userRepository.findByPhoneNumberAndDeletedAtIsNull(phone).ifPresent(user -> {
+            String otp = String.format("%06d", new Random().nextInt(999999));
+            user.setOtpCode(otp);
+            user.setOtpExpiredAt(LocalDateTime.now().plusMinutes(15));
+            user.setOtpVerified(false);
             userRepository.save(user);
-            log.info("[DEV] Reset token: email={} | token={}", email, token);
+            smsService.sendOtp(phone, otp);
         });
+        // Luôn trả 200 để không tiết lộ số điện thoại có tồn tại không
+    }
+
+    @Transactional
+    public VerifyOtpResponse verifyOtp(VerifyOtpRequest request) {
+        String phone = request.getPhoneNumber().trim();
+        User user = userRepository.findByPhoneNumberAndDeletedAtIsNull(phone)
+                .orElseThrow(() -> new BadRequestException("OTP không hợp lệ"));
+
+        if (user.getOtpCode() == null || !user.getOtpCode().equals(request.getOtp())) {
+            throw new BadRequestException("OTP không đúng");
+        }
+        if (user.getOtpExpiredAt() == null || LocalDateTime.now().isAfter(user.getOtpExpiredAt())) {
+            throw new BadRequestException("OTP đã hết hạn. Vui lòng yêu cầu lại");
+        }
+
+        // OTP hợp lệ → tạo reset token, hết hạn 10 phút
+        String token = UUID.randomUUID().toString();
+        user.setOtpVerified(true);
+        user.setOtpCode(null);
+        user.setOtpExpiredAt(null);
+        user.setResetPasswordToken(token);
+        user.setResetTokenExpiredAt(LocalDateTime.now().plusMinutes(10));
+        userRepository.save(user);
+
+        return VerifyOtpResponse.builder()
+                .resetToken(token)
+                .message("Xác thực OTP thành công")
+                .build();
     }
 
     @Transactional
@@ -184,6 +275,8 @@ public class AuthService {
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
         user.setResetPasswordToken(null);
         user.setResetTokenExpiredAt(null);
+        user.setOtpVerified(null);
+        user.setOtpExpiredAt(null);
         userRepository.save(user);
     }
 
@@ -218,14 +311,14 @@ public class AuthService {
         User user = findActiveUser(userId);
 
         if (request.getPhoneNumber() != null) {
-            boolean phoneConflict = userRepository
-                    .findByPhoneNumberAndDeletedAtIsNull(request.getPhoneNumber())
+            String newPhone = request.getPhoneNumber().trim();
+            boolean phoneConflict = userRepository.findByPhoneNumber(newPhone)
                     .filter(u -> !u.getId().equals(userId))
                     .isPresent();
             if (phoneConflict) {
                 throw new ConflictException("Số điện thoại đã được sử dụng");
             }
-            user.setPhoneNumber(request.getPhoneNumber());
+            user.setPhoneNumber(newPhone);
         }
         if (request.getAvatarUrl() != null) user.setAvatarUrl(request.getAvatarUrl());
 
@@ -269,15 +362,21 @@ public class AuthService {
         throw new BadRequestException("Định dạng ngày tháng không hợp lệ (hỗ trợ dd/MM/yyyy, yyyy-MM-dd, dd-MM-yyyy): " + dateStr);
     }
 
+    /** BR-05: Mật khẩu ≥8 ký tự, ít nhất 1 chữ hoa, ít nhất 1 chữ số */
     private void validatePasswordPolicy(String password) {
-        if (password == null || !password.matches("^\\d{6}$")) {
-            throw new BadRequestException("Mật khẩu phải bao gồm đúng 6 chữ số");
+        if (password == null || password.length() < 8) {
+            throw new BadRequestException("Mật khẩu tối thiểu 8 ký tự");
+        }
+        if (!password.matches(".*[A-Z].*")) {
+            throw new BadRequestException("Mật khẩu phải có ít nhất 1 chữ hoa");
+        }
+        if (!password.matches(".*\\d.*")) {
+            throw new BadRequestException("Mật khẩu phải có ít nhất 1 chữ số");
         }
     }
 
     private String generateTempPassword() {
-        int digits = (int)(Math.random() * 900_000) + 100_000;
-        return String.valueOf(digits);
+        return passwordService.generateTempPassword();
     }
 
     private String getClientIp(HttpServletRequest request) {

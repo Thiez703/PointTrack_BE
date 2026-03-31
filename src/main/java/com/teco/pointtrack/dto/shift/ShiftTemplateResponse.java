@@ -21,6 +21,7 @@ public class ShiftTemplateResponse {
     Long id;
     String name;
     Integer durationMinutes;
+    String notes;
     @JsonFormat(pattern = "HH:mm:ss")
     LocalTime defaultStart;
 

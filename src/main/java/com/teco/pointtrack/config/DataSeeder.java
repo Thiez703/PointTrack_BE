@@ -53,18 +53,15 @@ public class DataSeeder implements CommandLineRunner {
     private void seedWorkSchedule(User employee) {
         // 1. Tìm hoặc tạo Khách hàng (Tránh duplicate khi chạy lại code)
         String customerPhone = "0901234567";
-        Customer customer = customerRepository.findByPhoneNumberAndDeletedAtIsNull(customerPhone)
+        Customer customer = customerRepository.findByPhoneAndDeletedAtIsNull(customerPhone)
                 .orElseGet(() -> {
                     Customer newCustomer = Customer.builder()
                             .name("Khách hàng Mẫu (Trung tâm Q1)")
-                            .street("72 Lê Thánh Tôn")
-                            .ward("Bến Nghé")
-                            .district("Quận 1")
-                            .city("TP.HCM")
-                            .phoneNumber(customerPhone)
+                            .address("72 Lê Thánh Tôn, Bến Nghé, Quận 1, TP.HCM")
+                            .phone(customerPhone)
                             .latitude(10.7782)
                             .longitude(106.7011)
-                            .isActive(true)
+                            .status(CustomerStatus.ACTIVE)
                             .build();
                     return customerRepository.save(newCustomer);
                 });
@@ -218,9 +215,19 @@ public class DataSeeder implements CommandLineRunner {
     // Đổi kiểu trả về thành User để lấy dữ liệu gán vào hàm tạo Ca
     private User seedEmployeeUser() {
         String employeePhone = "0123456789";
+        String tempPassword   = "Test@1234";   // satisfies BR-05: 8+ chars, uppercase, digit
+
         var existing = userRepository.findByPhoneNumberAndDeletedAtIsNull(employeePhone);
         if (existing.isPresent()) {
-            return existing.get();
+            User emp = existing.get();
+            // Reset về trạng thái chưa đổi mật khẩu lần đầu để test flow first-change
+            if (!emp.isFirstLogin()) {
+                emp.setFirstLogin(true);
+                emp.setPasswordHash(passwordEncoder.encode(tempPassword));
+                userRepository.save(emp);
+                log.info(">>>> RESET employee {} → isFirstLogin=true, temp password: {}", employeePhone, tempPassword);
+            }
+            return emp;
         }
 
         Role userRole = roleRepository.findBySlug("USER")
@@ -230,14 +237,14 @@ public class DataSeeder implements CommandLineRunner {
                 .fullName("Employee Test")
                 .phoneNumber(employeePhone)
                 .email("employee@pointtrack.com")
-                .passwordHash(passwordEncoder.encode("123456"))
+                .passwordHash(passwordEncoder.encode(tempPassword))
                 .status(UserStatus.ACTIVE)
-                .isFirstLogin(false)
+                .isFirstLogin(true)
                 .role(userRole)
                 .build();
 
         User saved = userRepository.save(employee);
-        log.info("Seeded employee user: {} / 123456", employeePhone);
+        log.info("Seeded employee user: {} / {} (isFirstLogin=true)", employeePhone, tempPassword);
         return saved;
     }
 

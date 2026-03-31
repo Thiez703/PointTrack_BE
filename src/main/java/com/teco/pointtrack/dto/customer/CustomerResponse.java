@@ -1,11 +1,16 @@
 package com.teco.pointtrack.dto.customer;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.teco.pointtrack.entity.enums.CustomerSource;
+import com.teco.pointtrack.entity.enums.CustomerStatus;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
 import java.time.LocalDateTime;
 
+/**
+ * Response cho danh sách và CRUD khách hàng.
+ */
 @Data
 @Builder
 @NoArgsConstructor
@@ -16,17 +21,16 @@ public class CustomerResponse {
 
     Long id;
     String name;
-    String phoneNumber;
-    String email;
-    String street;
-    String ward;
-    String district;
-    String city;
+    String phone;
+    String secondaryPhone;
+    String address;
     Double latitude;
     Double longitude;
-    String note;
-    Boolean isActive;
+    boolean hasGps;
+    String specialNotes;
+    String preferredTimeNote;
+    CustomerSource source;
+    CustomerStatus status;
     LocalDateTime createdAt;
     LocalDateTime updatedAt;
 }
-

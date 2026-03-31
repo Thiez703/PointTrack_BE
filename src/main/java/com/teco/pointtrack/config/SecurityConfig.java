@@ -39,17 +39,15 @@ public class SecurityConfig {
     @Value("${app.cors.allowed-origins}")
     private String allowedOriginPatterns;
 
-    /** Các endpoint không cần JWT (Context-path /api đã gán ở ngoài) */
+    /** Các endpoint không cần JWT (Context-path /api được xử lý bởi server.servlet.context-path) */
     private static final String[] PUBLIC_MATCHERS = {
-            // User API Test
-            "/user/getAll",
-
             // Auth endpoints
-            "/auth/**", "/v1/auth/**",
+            "/v1/auth/**",
+            "/auth/**",
 
             // Swagger / API docs
             "/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**", "/api-docs/**",
-            "/swagger-resources/**", "/webjars/**",
+            "/swagger-resources/**", "/webjars/**", "/swagger-custom.css",
 
             // Static Resources
             "/uploads/**",

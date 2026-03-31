@@ -1,5 +1,6 @@
 package com.teco.pointtrack.exception;
 
+import com.teco.pointtrack.dto.common.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.context.request.ServletWebRequest;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.List;
 
@@ -21,6 +23,15 @@ import java.util.List;
 public class ApiExceptionHandler {
 
     private static final String ERROR_LOG_FORMAT = "Error: URI: {}, ErrorCode: {}, Message: {}";
+
+    // ── ShiftAssignException — trả về ApiResponse với errorCode (format đặc tả assign API) ──
+
+    @ExceptionHandler(ShiftAssignException.class)
+    public ResponseEntity<ApiResponse<Object>> handleShiftAssignException(ShiftAssignException ex, WebRequest request) {
+        log.warn(ERROR_LOG_FORMAT, getServletPath(request), ex.getErrorCode(), ex.getMessage());
+        ApiResponse<Object> body = ApiResponse.assignError(ex.getErrorCode(), ex.getMessage(), ex.getConflictDetail());
+        return ResponseEntity.status(ex.getHttpStatus()).body(body);
+    }
 
     @ExceptionHandler(NotFoundException.class)
     public ResponseEntity<ErrorDetail> handleNotFoundException(NotFoundException ex, WebRequest request) {
@@ -41,7 +52,9 @@ public class ApiExceptionHandler {
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ErrorDetail> handleConflictException(ConflictException ex, WebRequest request) {
         String message = ex.getMessage();
-        ErrorDetail errorVm = new ErrorDetail(HttpStatus.CONFLICT.toString(), "Conflict", message);
+        ErrorDetail errorVm = new ErrorDetail(
+                HttpStatus.CONFLICT.toString(), "Conflict", message,
+                java.util.Collections.emptyList(), ex.getErrorCode());
         log.warn(ERROR_LOG_FORMAT, getServletPath(request), 409, message);
         return ResponseEntity.status(HttpStatus.CONFLICT).body(errorVm);
     }
@@ -97,12 +110,30 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(errorVm);
     }
 
-    @ExceptionHandler(NoHandlerFoundException.class)
-    public ResponseEntity<ErrorDetail> handleNoResourceFound(NoHandlerFoundException ex, WebRequest request) {
-        String message = "Không tìm thấy API này trong hệ thống: " + ex.getRequestURL();
+    @ExceptionHandler({NoHandlerFoundException.class, NoResourceFoundException.class})
+    public ResponseEntity<ErrorDetail> handleNoResourceFound(Exception ex, WebRequest request) {
+        String path = getServletPath(request);
+        String message = "Không tìm thấy API: " + path;
         ErrorDetail errorVm = new ErrorDetail(HttpStatus.NOT_FOUND.toString(), "Endpoint Not Found", message);
-        log.warn(ERROR_LOG_FORMAT, getServletPath(request), 404, message);
+        log.warn(ERROR_LOG_FORMAT, path, 404, message);
         return new ResponseEntity<>(errorVm, HttpStatus.NOT_FOUND);
+    }
+
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    public ResponseEntity<ErrorDetail> handleMaxUploadSize(
+            org.springframework.web.multipart.MaxUploadSizeExceededException ex) {
+        ErrorDetail errorVm = new ErrorDetail("400", "File Too Large",
+                "Kích thước file vượt quá giới hạn cho phép (tối đa 10MB)");
+        return ResponseEntity.badRequest().body(errorVm);
+    }
+
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ErrorDetail> handleMethodNotSupported(
+            org.springframework.web.HttpRequestMethodNotSupportedException ex, WebRequest request) {
+        String message = String.format("Phương thức %s không được hỗ trợ cho endpoint này. Vui lòng dùng %s",
+                ex.getMethod(), java.util.Arrays.toString(ex.getSupportedMethods()));
+        ErrorDetail errorVm = new ErrorDetail(HttpStatus.METHOD_NOT_ALLOWED.toString(), "Method Not Allowed", message);
+        return new ResponseEntity<>(errorVm, HttpStatus.METHOD_NOT_ALLOWED);
     }
 
     @ExceptionHandler(Exception.class)
