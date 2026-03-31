@@ -40,9 +40,9 @@ public class ShiftController {
             summary = "Lấy danh sách ca làm việc",
             description = "Filter theo tuần ISO (week=2026-W12), tháng (month=3&year=2026), " +
                           "hoặc nhân viên. Kết quả nhóm theo employeeId. " +
-                          "ADMIN xem tất cả; EMPLOYEE chỉ xem ca của chính mình (employeeId bị bỏ qua)."
+                          "ADMIN xem tất cả; EMPLOYEE/USER chỉ xem ca của chính mình (employeeId bị bỏ qua)."
     )
-    @PreAuthorize("hasAnyRole('ADMIN', 'EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'EMPLOYEE', 'USER')")
     public ResponseEntity<ApiResponse<Map<String, List<ShiftResponse>>>> getShifts(
             @RequestParam(required = false) String week,
             @RequestParam(required = false) Integer month,
@@ -54,6 +54,7 @@ public class ShiftController {
                 && currentUser.getRole() != null
                 && "ADMIN".equalsIgnoreCase(currentUser.getRole().getSlug());
 
+        // Nếu không phải ADMIN, bỏ qua employeeId từ request và dùng ID của chính mình
         Long effectiveEmployeeId = isAdmin ? employeeId : (currentUser != null ? currentUser.getId() : null);
 
         Map<String, List<ShiftResponse>> data = shiftService.getShifts(week, month, year, effectiveEmployeeId);
@@ -211,41 +212,6 @@ public class ShiftController {
     public ResponseEntity<ApiResponse<Void>> cancel(@PathVariable Long id) {
         shiftService.cancel(id);
         return ResponseEntity.ok(ApiResponse.success(null, "Huỷ ca thành công"));
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // POST /api/v1/shifts/{id}/check-in
-    // ─────────────────────────────────────────────────────────────────────────
-
-    @PostMapping("/{id}/check-in")
-    @Operation(
-            summary = "Nhân viên check-in ca làm việc (GPS geofence)",
-            description = "Ghi nhận vị trí GPS, tính khoảng cách Haversine đến khách hàng. " +
-                          "Ca chuyển trạng thái → IN_PROGRESS. withinGeofence=false nếu vượt bán kính cho phép."
-    )
-    @PreAuthorize("hasAnyRole('ADMIN', 'EMPLOYEE')")
-    public ResponseEntity<ApiResponse<CheckInResponse>> checkIn(
-            @PathVariable Long id,
-            @Valid @RequestBody CheckInRequest request) {
-        CheckInResponse data = shiftService.checkIn(id, request);
-        return ResponseEntity.ok(ApiResponse.success(data, data.getMessage()));
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // POST /api/v1/shifts/{id}/check-out
-    // ─────────────────────────────────────────────────────────────────────────
-
-    @PostMapping("/{id}/check-out")
-    @Operation(
-            summary = "Nhân viên check-out ca làm việc (GPS geofence)",
-            description = "Ca chuyển trạng thái → COMPLETED."
-    )
-    @PreAuthorize("hasAnyRole('ADMIN', 'EMPLOYEE')")
-    public ResponseEntity<ApiResponse<CheckInResponse>> checkOut(
-            @PathVariable Long id,
-            @Valid @RequestBody CheckInRequest request) {
-        CheckInResponse data = shiftService.checkOut(id, request);
-        return ResponseEntity.ok(ApiResponse.success(data, data.getMessage()));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
