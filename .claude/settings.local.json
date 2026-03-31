@@ -28,7 +28,13 @@
       "Bash(sed -n '15p' \"D:/ThiezDuAn/PointTrack_BE/src/main/java/com/teco/pointtrack/controller/UserController.java\")",
       "Bash(sed -n '18p' \"D:/ThiezDuAn/PointTrack_BE/src/main/java/com/teco/pointtrack/controller/ServicePackageController.java\")",
       "Bash(sed -n '19p' \"D:/ThiezDuAn/PointTrack_BE/src/main/java/com/teco/pointtrack/controller/SalaryLevelController.java\")",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(find /d/ThiezDuAn/PointTrack_BE -maxdepth 2 -type f -name *.md -o -name *.json -o -name *.xml -o -name *.gradle)",
+      "Bash(sed -i 's|@RequestMapping\\(\"\"/v1/shift-templates\"\"\\)|@RequestMapping\\(\"\"/shift-templates\"\"\\)|g' src/main/java/com/teco/pointtrack/controller/ShiftTemplateController.java)",
+      "Bash(sed -i 's|@RequestMapping\\(\"\"/v1/customers\"\"\\)|@RequestMapping\\(\"\"/customers\"\"\\)|g' src/main/java/com/teco/pointtrack/controller/CustomerController.java)",
+      "Bash(sed -i 's|@RequestMapping\\(\"\"/v1/packages\"\"\\)|@RequestMapping\\(\"\"/packages\"\"\\)|g' src/main/java/com/teco/pointtrack/controller/ServicePackageController.java)",
+      "Bash(sed -i 's|@RequestMapping\\(\"\"/v1/files\"\"\\)|@RequestMapping\\(\"\"/files\"\"\\)|g' src/main/java/com/teco/pointtrack/controller/FileUploadController.java)",
+      "Bash(sed -i 's|@RequestMapping\\(\"\"/v1/scheduling/settings\"\"\\)|@RequestMapping\\(\"\"/scheduling/settings\"\"\\)|g' src/main/java/com/teco/pointtrack/controller/SchedulingSettingsController.java)"
     ]
   }
 }

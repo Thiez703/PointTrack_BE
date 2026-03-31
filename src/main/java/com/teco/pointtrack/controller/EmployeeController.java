@@ -26,7 +26,7 @@ import java.util.List;
  * Base path: /api/v1/employees  (context-path = /api)
  */
 @RestController
-@RequestMapping("/v1/employees")
+@RequestMapping("/employees")
 @RequiredArgsConstructor
 @Tag(name = "Employee Management", description = "Quản lý Nhân viên – CRUD + Import Excel")
 @SecurityRequirement(name = "bearerAuth")

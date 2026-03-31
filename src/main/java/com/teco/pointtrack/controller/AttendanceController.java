@@ -23,7 +23,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @RestController
-@RequestMapping("/v1/attendance")
+@RequestMapping("/attendance")
 @RequiredArgsConstructor
 @SecurityRequirement(name = "bearerAuth")
 @Tag(name = "Attendance", description = "Chấm công — Check-in/Check-out & Giải trình")
@@ -110,25 +110,6 @@ public class AttendanceController {
         CheckOutResponse result = attendanceService.checkOut(
                 attendanceRecordId, lat, lng, capturedAt, checkOutReason, photo, userId);
         return ResponseEntity.ok(ApiResponse.success(result, result.getMessage()));
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Quản lý ca làm việc (Work Schedule) - Đồng bộ với giao diện FE mới
-    // ─────────────────────────────────────────────────────────────────────────
-
-    @Operation(summary = "Tạo ca làm việc mới")
-    @PostMapping("/schedule/create")
-    public ResponseEntity<ApiResponse<WorkScheduleResponse>> createSchedule(
-            @Valid @RequestBody WorkScheduleRequest request) {
-        WorkScheduleResponse data = attendanceService.createWorkSchedule(request);
-        return ResponseEntity.ok(ApiResponse.success(data, "Tạo ca làm việc thành công"));
-    }
-
-    @Operation(summary = "Lấy danh sách tất cả ca làm việc")
-    @GetMapping("/schedule/all")
-    public ResponseEntity<ApiResponse<java.util.List<WorkScheduleResponse>>> getAllSchedules() {
-        java.util.List<WorkScheduleResponse> data = attendanceService.getAllWorkSchedules();
-        return ResponseEntity.ok(ApiResponse.success(data, "Lấy danh sách ca làm việc thành công"));
     }
 
     // ─────────────────────────────────────────────────────────────────────────

@@ -19,7 +19,7 @@ import java.util.Map;
  * FE upload trước → nhận URL → đính kèm vào request tạo/cập nhật.
  */
 @RestController
-@RequestMapping("/tmpUpload")
+@RequestMapping("/files")
 @RequiredArgsConstructor
 @Slf4j
 @Tag(name = "File Upload", description = "Upload file lên server")
@@ -29,20 +29,13 @@ public class FileUploadController {
     private final FileStorageService fileStorageService;
 
     /**
-     * POST /api/tmpUpload
-     * Content-Type: multipart/form-data  (KHÔNG set thủ công ở FE, để browser tự set)
+     * POST /api/v1/files/upload
+     * Content-Type: multipart/form-data
      *
      * Form field: "file"
-     *
-     * Response:
-     * {
-     *   "success": true,
-     *   "data": { "url": "http://localhost:8080/api/uploads/tmp/2026/03/21/uuid.jpg" },
-     *   "message": "Upload thành công"
-     * }
      */
     @Operation(summary = "Upload file tạm (avatar, ảnh...)")
-    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<Map<String, String>>> uploadTmpFile(
             @RequestParam("file") MultipartFile file) {
 

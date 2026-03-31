@@ -27,7 +27,7 @@ import java.util.List;
  * Base path: /api/v1/customers
  */
 @RestController
-@RequestMapping("/v1/customers")
+@RequestMapping("/customers")
 @RequiredArgsConstructor
 @Tag(name = "Customer", description = "Quản lý Khách hàng")
 @SecurityRequirement(name = "bearerAuth")

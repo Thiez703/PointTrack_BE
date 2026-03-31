@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/v1/shifts")
+@RequestMapping("/shifts")
 @RequiredArgsConstructor
 @Tag(name = "Shift", description = "Quản lý ca làm việc – BR-06, BR-09, BR-10, BR-13")
 public class ShiftController {
@@ -293,7 +293,7 @@ public class ShiftController {
             summary = "Nhân viên xác nhận sẽ đi làm (EMPLOYEE)",
             description = "Ca chuyển ASSIGNED → CONFIRMED. Admin sẽ biết chắc nhân viên sẽ đến."
     )
-    @PreAuthorize("hasAnyRole('ADMIN', 'EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'EMPLOYEE', 'USER')")
     public ResponseEntity<ApiResponse<ShiftResponse>> confirmShift(
             @PathVariable Long id,
             @Parameter(description = "ID nhân viên xác nhận") @RequestParam Long employeeId) {

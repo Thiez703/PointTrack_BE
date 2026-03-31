@@ -12,7 +12,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/v1/scheduling/settings")
+@RequestMapping("/scheduling/settings")
 @RequiredArgsConstructor
 @Tag(name = "Scheduling Settings", description = "Cấu hình Grace Period, Penalty Rules, Travel Buffer")
 public class SchedulingSettingsController {
