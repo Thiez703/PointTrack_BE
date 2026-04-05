@@ -37,7 +37,7 @@ import org.springframework.web.bind.annotation.*;
  *   PUT    /api/v1/auth/profile               FR-07 – Sửa hồ sơ
  */
 @RestController
-@RequestMapping("/auth")
+@RequestMapping("/v1/auth")
 @RequiredArgsConstructor
 @Tag(name = "Authentication", description = "Xác thực & Quản lý tài khoản")
 public class AuthController {
@@ -45,6 +45,46 @@ public class AuthController {
     private final AuthService authService;
     private final JwtUtils jwtUtils;
     private final CookieUtils cookieUtils;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FR-07: Hồ sơ cá nhân (Chuyển lên đầu để tránh conflict routing)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Operation(summary = "Lấy thông tin người dùng hiện tại",
+               description = "Trả về thông tin đầy đủ của người dùng đang đăng nhập.")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("isAuthenticated()")
+    @GetMapping("/me")
+    public ResponseEntity<ApiResponse<UserDetail>> getMe() {
+        UserDetail userDetail = AuthUtils.getUserDetail();
+        if (userDetail == null) {
+            throw new com.teco.pointtrack.exception.SignInRequiredException("SIGN_IN_REQUIRED");
+        }
+        return ResponseEntity.ok(ApiResponse.success(authService.getProfile(userDetail.getId()), "Lấy thông tin tài khoản thành công"));
+    }
+
+    @Operation(summary = "Xem hồ sơ cá nhân")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("isAuthenticated()")
+    @GetMapping("/profile")
+    public ResponseEntity<ApiResponse<UserDetail>> getProfile() {
+        Long userId = AuthUtils.getUserDetail().getId();
+        UserDetail profile = authService.getProfile(userId);
+        return ResponseEntity.ok(ApiResponse.success(profile, "Lấy hồ sơ cá nhân thành công"));
+    }
+
+    @Operation(summary = "Cập nhật hồ sơ cá nhân",
+               description = "Chỉ sửa được: phoneNumber, avatarUrl. Không sửa được: email, role, salaryLevel.")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("isAuthenticated()")
+    @PutMapping("/profile")
+    public ResponseEntity<ApiResponse<UserDetail>> updateProfile(
+            @RequestBody UpdateProfileRequest request) {
+
+        Long userId = AuthUtils.getUserDetail().getId();
+        UserDetail updated = authService.updateProfile(request, userId);
+        return ResponseEntity.ok(ApiResponse.success(updated, "Cập nhật hồ sơ thành công"));
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // FR-01: Admin tạo tài khoản NV
@@ -191,42 +231,6 @@ public class AuthController {
         authService.logout(accessToken, refreshToken);
         cookieUtils.deleteAuthCookies(response);
         return ResponseEntity.ok(new MessageResponse("Đăng xuất thành công."));
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // FR-07: Hồ sơ cá nhân
-    // ─────────────────────────────────────────────────────────────────────────
-
-    @Operation(summary = "Lấy thông tin người dùng hiện tại",
-               description = "Trả về thông tin đầy đủ của người dùng đang đăng nhập.")
-    @SecurityRequirement(name = "bearerAuth")
-    @GetMapping("/me")
-    public ResponseEntity<ApiResponse<UserDetail>> getMe() {
-        com.teco.pointtrack.dto.user.UserDetail userDetail = AuthUtils.getUserDetail();
-        if (userDetail == null) {
-            throw new com.teco.pointtrack.exception.SignInRequiredException("SIGN_IN_REQUIRED");
-        }
-        return ResponseEntity.ok(ApiResponse.success(authService.getProfile(userDetail.getId()), null));
-    }
-
-    @Operation(summary = "Xem hồ sơ cá nhân")
-    @SecurityRequirement(name = "bearerAuth")
-    @GetMapping("/profile")
-    public ResponseEntity<UserDetail> getProfile() {
-        Long userId = AuthUtils.getUserDetail().getId();
-        return ResponseEntity.ok(authService.getProfile(userId));
-    }
-
-    @Operation(summary = "Cập nhật hồ sơ cá nhân",
-               description = "Chỉ sửa được: phoneNumber, avatarUrl. " +
-                             "Không sửa được: email, role, salaryLevel.")
-    @SecurityRequirement(name = "bearerAuth")
-    @PutMapping("/profile")
-    public ResponseEntity<UserDetail> updateProfile(
-            @RequestBody UpdateProfileRequest request) {
-
-        Long userId = AuthUtils.getUserDetail().getId();
-        return ResponseEntity.ok(authService.updateProfile(request, userId));
     }
 
     // ─────────────────────────────────────────────────────────────────────────

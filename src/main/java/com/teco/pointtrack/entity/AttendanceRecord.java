@@ -95,6 +95,18 @@ public class AttendanceRecord extends BaseEntity {
     @Builder.Default
     BigDecimal otMultiplier = BigDecimal.ONE;
 
+    /** Tổng số phút làm thực tế (checkOutTime - checkInTime). Null cho đến khi check-out. */
+    @Column(name = "worked_minutes")
+    Long workedMinutes;
+
+    /** Số giờ làm thực tế = workedMinutes / 60.0, làm tròn 2 chữ số thập phân. */
+    @Column(name = "worked_hours")
+    Double workedHours;
+
+    /** Lương tạm tính = workedHours × ratePerHour × otMultiplier. */
+    @Column(name = "estimated_salary", precision = 15, scale = 2)
+    BigDecimal estimatedSalary;
+
     /** Ghi chú tổng hợp (Admin có thể thêm khi chỉnh sửa) */
     @Column(length = 1000)
     String note;

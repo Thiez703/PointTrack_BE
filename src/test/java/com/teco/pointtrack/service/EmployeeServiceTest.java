@@ -251,6 +251,11 @@ class EmployeeServiceTest {
         @Test
         @DisplayName("Lấy hồ sơ cá nhân thành công với đầy đủ thống kê")
         void getEmployeeProfile_success() {
+            SalaryLevel salaryLevel = SalaryLevel.builder()
+                    .name("Nhân viên kỹ thuật")
+                    .baseSalary(new BigDecimal("100000"))
+                    .build();
+
             User user = User.builder()
                     .id(123L)
                     .fullName("Nguyễn Văn A")
@@ -258,7 +263,7 @@ class EmployeeServiceTest {
                     .email("nguyenvana@company.com")
                     .status(UserStatus.ACTIVE)
                     .role(Role.builder().slug("USER").build())
-                    .salaryLevel(SalaryLevel.builder().name("Nhân viên kỹ thuật").build())
+                    .salaryLevel(salaryLevel)
                     .startDate(java.time.LocalDate.of(2024, 1, 15))
                     .build();
 
@@ -274,6 +279,9 @@ class EmployeeServiceTest {
                 when(attendanceRepository.countWorkDaysByUserAndPeriod(eq(123L), any(), any())).thenReturn(22L);
                 when(attendanceRepository.sumOtHoursByUserAndPeriod(eq(123L), any(), any())).thenReturn(14.5);
                 when(attendanceRepository.countLateCheckinsByUserAndPeriod(eq(123L), any(), any())).thenReturn(2L);
+                when(attendanceRepository.sumActualMinutesByUserIdAndWorkDateBetween(eq(123L), any(), any())).thenReturn(600L); // 10h
+                when(attendanceRepository.sumWeightedMinutesByUserIdAndWorkDateBetween(eq(123L), any(), any())).thenReturn(660.0); // 11h weighted
+
                 when(attendanceRepository.countWorkDaysHistoryByUser(eq(123L), any())).thenReturn(List.of(
                         new Object[]{9, 20L},
                         new Object[]{10, 23L},
@@ -288,8 +296,10 @@ class EmployeeServiceTest {
                 assertThat(response.getId()).isEqualTo(123L);
                 assertThat(response.getFullName()).isEqualTo("Nguyễn Văn A");
                 assertThat(response.getWorkStatistics().getSummary().getTotalWorkDaysThisMonth()).isEqualTo(22L);
+                assertThat(response.getWorkStatistics().getSummary().getTotalHoursThisMonth()).isEqualTo(10.0);
                 assertThat(response.getWorkStatistics().getSummary().getOtHoursThisMonth()).isEqualTo(14.5);
                 assertThat(response.getWorkStatistics().getSummary().getLateDaysThisMonth()).isEqualTo(2L);
+                assertThat(response.getWorkStatistics().getSummary().getEstimatedSalaryThisMonth()).isEqualTo(1100000L); // 11h * 100000
                 assertThat(response.getWorkStatistics().getHistory()).hasSize(6);
             }
         }

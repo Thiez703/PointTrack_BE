@@ -48,6 +48,55 @@ public class DataSeeder implements CommandLineRunner {
         // Khởi tạo và lấy ra Employee để gán ca làm việc (Test App)
         User employee = seedEmployeeUser();
         seedWorkSchedule(employee);
+        seedAttendanceRecords(employee);
+    }
+
+    private final AttendanceRecordRepository attendanceRepository;
+
+    private void seedAttendanceRecords(User employee) {
+        // Đảm bảo nhân viên có cấp bậc lương cao nhất để test (100k/h)
+        if (employee.getSalaryLevel() == null || !employee.getSalaryLevel().getName().equals("Cấp 3")) {
+            salaryLevelRepository.findByNameAndDeletedAtIsNull("Cấp 3").ifPresent(level -> {
+                employee.setSalaryLevel(level);
+                userRepository.save(employee);
+                log.info(">>>> ĐÃ GÁN LƯƠNG CẤP 3 CHO NHÂN VIÊN {}.", employee.getPhoneNumber());
+            });
+        }
+
+        // Tạo 2 ca làm việc đã hoàn tất cho 2 ngày trước (Hôm qua và Hôm kia)
+        LocalDate today = LocalDate.now();
+        Customer customer = customerRepository.findAll().get(0);
+        ShiftTemplate shiftTemplate = shiftTemplateRepository.findAll().get(0);
+
+        for (int i = 1; i <= 2; i++) {
+            LocalDate workDate = today.minusDays(i);
+            if (!workScheduleRepository.existsByUserIdAndWorkDate(employee.getId(), workDate)) {
+                WorkSchedule schedule = WorkSchedule.builder()
+                        .user(employee)
+                        .customer(customer)
+                        .shiftTemplate(shiftTemplate)
+                        .workDate(workDate)
+                        .scheduledStart(LocalDateTime.of(workDate, shiftTemplate.getDefaultStart()))
+                        .scheduledEnd(LocalDateTime.of(workDate, shiftTemplate.getDefaultEnd()))
+                        .status(WorkScheduleStatus.CONFIRMED) // Đã check-in
+                        .build();
+                workScheduleRepository.save(schedule);
+
+                // Tạo bản ghi chấm công đã hoàn tất
+                AttendanceRecord record = AttendanceRecord.builder()
+                        .workSchedule(schedule)
+                        .user(employee)
+                        .checkInTime(schedule.getScheduledStart())
+                        .checkOutTime(schedule.getScheduledEnd())
+                        .actualMinutes(240) // 4 tiếng
+                        .otMultiplier(BigDecimal.valueOf(1.0))
+                        .status(AttendanceStatus.ON_TIME)
+                        .build();
+                attendanceRepository.save(record);
+
+                log.info(">>>> ĐÃ TẠO CHẤM CÔNG MẪU CHO NGÀY {}: 4 TIẾNG.", workDate);
+            }
+        }
     }
 
     private void seedWorkSchedule(User employee) {

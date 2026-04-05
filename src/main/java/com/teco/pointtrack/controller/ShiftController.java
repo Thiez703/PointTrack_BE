@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/shifts")
+@RequestMapping("/v1/shifts")
 @RequiredArgsConstructor
 @Tag(name = "Shift", description = "Quản lý ca làm việc – BR-06, BR-09, BR-10, BR-13")
 public class ShiftController {
@@ -39,14 +39,17 @@ public class ShiftController {
     @Operation(
             summary = "Lấy danh sách ca làm việc",
             description = "Filter theo tuần ISO (week=2026-W12), tháng (month=3&year=2026), " +
-                          "hoặc nhân viên. Kết quả nhóm theo employeeId. " +
-                          "ADMIN xem tất cả; EMPLOYEE/USER chỉ xem ca của chính mình (employeeId bị bỏ qua)."
+                          "khoảng ngày (startDate & endDate), hoặc nhân viên. " +
+                          "Nếu có employeeId, trả về cấu trúc {content: []}. Nếu không, nhóm theo employeeId. " +
+                          "ADMIN xem tất cả; EMPLOYEE/USER chỉ xem ca của chính mình."
     )
     @PreAuthorize("hasAnyRole('ADMIN', 'EMPLOYEE', 'USER')")
-    public ResponseEntity<ApiResponse<Map<String, List<ShiftResponse>>>> getShifts(
+    public ResponseEntity<ApiResponse<Object>> getShifts(
             @RequestParam(required = false) String week,
             @RequestParam(required = false) Integer month,
             @RequestParam(required = false) Integer year,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(required = false) Long employeeId) {
 
         UserDetail currentUser = AuthUtils.getUserDetail();
@@ -54,10 +57,9 @@ public class ShiftController {
                 && currentUser.getRole() != null
                 && "ADMIN".equalsIgnoreCase(currentUser.getRole().getSlug());
 
-        // Nếu không phải ADMIN, bỏ qua employeeId từ request và dùng ID của chính mình
         Long effectiveEmployeeId = isAdmin ? employeeId : (currentUser != null ? currentUser.getId() : null);
 
-        Map<String, List<ShiftResponse>> data = shiftService.getShifts(week, month, year, effectiveEmployeeId);
+        Object data = shiftService.getShiftsV2(week, month, year, startDate, endDate, effectiveEmployeeId);
         return ResponseEntity.ok(ApiResponse.success(data, "Lấy danh sách ca thành công"));
     }
 
@@ -299,5 +301,67 @@ public class ShiftController {
             @Parameter(description = "ID nhân viên xác nhận") @RequestParam Long employeeId) {
         ShiftResponse data = shiftService.confirmShift(id, employeeId);
         return ResponseEntity.ok(ApiResponse.success(data, "Xác nhận ca thành công. Trạng thái: CONFIRMED."));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // GET /api/v1/shifts/my-today — Ca hôm nay của nhân viên hiện tại
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @GetMapping("/my-today")
+    @Operation(
+            summary = "Ca hôm nay của nhân viên đang đăng nhập",
+            description = "Trả về danh sách ca trong ngày hôm nay kèm trạng thái (ASSIGNED, IN_PROGRESS, COMPLETED…). " +
+                          "ADMIN có thể truyền thêm ?employeeId=X để xem ca của nhân viên cụ thể."
+    )
+    @PreAuthorize("hasAnyRole('ADMIN', 'EMPLOYEE', 'USER')")
+    public ResponseEntity<ApiResponse<List<ShiftResponse>>> getMyTodayShifts(
+            @RequestParam(required = false) Long employeeId) {
+
+        UserDetail currentUser = AuthUtils.getUserDetail();
+        boolean isAdmin = currentUser != null
+                && currentUser.getRole() != null
+                && "ADMIN".equalsIgnoreCase(currentUser.getRole().getSlug());
+
+        Long targetId = isAdmin && employeeId != null ? employeeId : currentUser.getId();
+
+        List<ShiftResponse> data = shiftService.getMyTodayShifts(targetId);
+        return ResponseEntity.ok(ApiResponse.success(data, "Lấy ca hôm nay thành công"));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // POST /api/v1/shifts/{id}/check-in
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @PostMapping("/{id}/check-in")
+    @Operation(
+            summary = "Check-in ca làm việc (GPS Geofence)",
+            description = "Ca chuyển ASSIGNED/CONFIRMED → IN_PROGRESS. " +
+                          "Validate GPS trong bán kính `geofence-radius-meters` (mặc định 100m)."
+    )
+    @PreAuthorize("hasAnyRole('ADMIN', 'EMPLOYEE', 'USER')")
+    public ResponseEntity<ApiResponse<CheckInResponse>> checkIn(
+            @PathVariable Long id,
+            @Valid @RequestBody CheckInRequest request) {
+
+        CheckInResponse data = shiftService.checkIn(id, request);
+        return ResponseEntity.ok(ApiResponse.success(data, data.getMessage()));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // POST /api/v1/shifts/{id}/check-out
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @PostMapping("/{id}/check-out")
+    @Operation(
+            summary = "Check-out ca làm việc",
+            description = "Ca chuyển IN_PROGRESS → COMPLETED. Tính actualMinutes."
+    )
+    @PreAuthorize("hasAnyRole('ADMIN', 'EMPLOYEE', 'USER')")
+    public ResponseEntity<ApiResponse<CheckInResponse>> checkOut(
+            @PathVariable Long id,
+            @Valid @RequestBody CheckInRequest request) {
+
+        CheckInResponse data = shiftService.checkOut(id, request);
+        return ResponseEntity.ok(ApiResponse.success(data, data.getMessage()));
     }
 }

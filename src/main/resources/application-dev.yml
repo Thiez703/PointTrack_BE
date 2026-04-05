@@ -75,5 +75,5 @@ app:
   shift:
     geofence-radius-meters: ${GEOFENCE_RADIUS_METERS:100}
   cookie:
-    secure: false
-    same-site: Lax
+    secure: true
+    same-site: None

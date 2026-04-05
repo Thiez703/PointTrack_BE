@@ -27,7 +27,7 @@ import java.util.List;
  * Base path: /api/v1/customers
  */
 @RestController
-@RequestMapping("/customers")
+@RequestMapping("/v1/customers")
 @RequiredArgsConstructor
 @Tag(name = "Customer", description = "Quản lý Khách hàng")
 @SecurityRequirement(name = "bearerAuth")
@@ -59,6 +59,42 @@ public class CustomerController {
     public ResponseEntity<ApiResponse<List<ActiveCustomerResponse>>> getActiveWithGps() {
         List<ActiveCustomerResponse> list = customerService.getActiveWithGps();
         return ResponseEntity.ok(ApiResponse.success(list, "Lấy danh sách khách hàng thành công"));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // GET /customers/import/template — Download template Excel
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Operation(summary = "Tải template Excel để import khách hàng")
+    @GetMapping("/import/template")
+    public ResponseEntity<byte[]> downloadTemplate() throws IOException {
+        byte[] templateBytes = customerImportService.generateTemplate();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"customer_import_template.xlsx\"")
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(templateBytes);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // GET /customers/export — Xuất Excel dữ liệu thật
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Operation(summary = "Xuất danh sách khách hàng ra file Excel (có lọc theo request)")
+    @GetMapping("/export")
+    public ResponseEntity<byte[]> exportCustomers(
+            @ModelAttribute CustomerPageRequest request) throws IOException {
+
+        List<Customer> customers = customerService.getCustomersForExport(request);
+        byte[] excelBytes = customerImportService.exportToExcel(customers);
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"customers_export.xlsx\"")
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(excelBytes);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -169,41 +205,5 @@ public class CustomerController {
         String message = String.format("Import hoàn tất: %d thành công, %d thất bại",
                 result.getSuccess(), result.getFailed());
         return ResponseEntity.ok(ApiResponse.success(result, message));
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // GET /customers/import/template — Download template Excel
-    // ─────────────────────────────────────────────────────────────────────────
-
-    @Operation(summary = "Tải template Excel để import khách hàng")
-    @GetMapping("/import/template")
-    public ResponseEntity<byte[]> downloadTemplate() throws IOException {
-        byte[] templateBytes = customerImportService.generateTemplate();
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=\"customer_import_template.xlsx\"")
-                .contentType(MediaType.parseMediaType(
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
-                .body(templateBytes);
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // GET /customers/export — Xuất Excel dữ liệu thật
-    // ─────────────────────────────────────────────────────────────────────────
-
-    @Operation(summary = "Xuất danh sách khách hàng ra file Excel (có lọc theo request)")
-    @GetMapping("/export")
-    public ResponseEntity<byte[]> exportCustomers(
-            @ModelAttribute CustomerPageRequest request) throws IOException {
-
-        List<Customer> customers = customerService.getCustomersForExport(request);
-        byte[] excelBytes = customerImportService.exportToExcel(customers);
-
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=\"customers_export.xlsx\"")
-                .contentType(MediaType.parseMediaType(
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
-                .body(excelBytes);
     }
 }

@@ -47,11 +47,37 @@ public class ShiftService {
 
     @Transactional(readOnly = true)
     public Map<String, List<ShiftResponse>> getShifts(String week, Integer month, Integer year, Long employeeId) {
+        return (Map<String, List<ShiftResponse>>) getShiftsV2(week, month, year, null, null, employeeId);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // GET /api/v1/shifts/my-today — ca hôm nay của nhân viên hiện tại
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Transactional(readOnly = true)
+    public List<ShiftResponse> getMyTodayShifts(Long employeeId) {
+        LocalDate today = LocalDate.now();
+        // Lấy khoảng ±1 ngày để xử lý:
+        // 1. Ca qua đêm (shiftDate hôm qua nhưng check-out hôm nay)
+        // 2. Chênh lệch múi giờ server (UTC) vs VN (GMT+7)
+        return shiftRepository.findRelevantShifts(employeeId, today.minusDays(1), today.plusDays(1))
+                .stream()
+                .map(this::toResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * V2 hỗ trợ startDate, endDate và format {content: []}
+     */
+    @Transactional(readOnly = true)
+    public Object getShiftsV2(String week, Integer month, Integer year, LocalDate startDate, LocalDate endDate, Long employeeId) {
         LocalDate from;
         LocalDate to;
 
-        if (week != null && !week.isBlank()) {
-            // VD: "2026-W12"
+        if (startDate != null && endDate != null) {
+            from = startDate;
+            to   = endDate;
+        } else if (week != null && !week.isBlank()) {
             int[] yw = parseIsoWeek(week);
             from = isoWeekStart(yw[0], yw[1]);
             to   = from.plusDays(6);
@@ -59,16 +85,24 @@ public class ShiftService {
             from = LocalDate.of(year, month, 1);
             to   = from.with(TemporalAdjusters.lastDayOfMonth());
         } else {
-            // Mặc định: tuần hiện tại
             from = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
             to   = from.plusDays(6);
         }
 
         List<Shift> shifts = shiftRepository.findByDateRangeAndEmployee(from, to, employeeId);
-
-        // Group by employeeId (dạng string) → list ca
-        return shifts.stream()
+        List<ShiftResponse> responseList = shifts.stream()
                 .map(this::toResponse)
+                .collect(Collectors.toList());
+
+        // Nếu FE truyền employeeId -> trả về {content: []} đúng ý FE
+        if (employeeId != null) {
+            Map<String, Object> result = new HashMap<>();
+            result.put("content", responseList);
+            return result;
+        }
+
+        // Nếu không -> giữ logic cũ (group by employeeId cho Admin view)
+        return responseList.stream()
                 .collect(Collectors.groupingBy(s -> String.valueOf(s.getEmployeeId())));
     }
 
@@ -179,9 +213,9 @@ public class ShiftService {
         }
 
         // ── Bước 1b: Validate khoảng thời gian ──────────────────────────────
-        if (req.getShiftType() != ShiftType.OT_EMERGENCY && !endTime.isAfter(startTime)) {
+        if (endTime.equals(startTime)) {
             throw new ShiftAssignException("INVALID_TIME_RANGE",
-                    "Thời gian bắt đầu phải nhỏ hơn thời gian kết thúc",
+                    "Giờ bắt đầu và kết thúc không được giống nhau",
                     HttpStatus.BAD_REQUEST);
         }
 
@@ -786,15 +820,15 @@ public class ShiftService {
                 .orElseThrow(() -> new NotFoundException("Khách hàng không tồn tại (id={})", id));
     }
 
-    /** BR-10 */
     private void validateOvernightRule(ShiftType type, LocalTime start, LocalTime end) {
-        if ((type == ShiftType.NORMAL || type == ShiftType.HOLIDAY) && !end.isAfter(start)) {
-            throw new BadRequestException("SHIFT_OVERNIGHT_INVALID: Ca NORMAL/HOLIDAY phải kết thúc sau giờ bắt đầu (không qua đêm)");
+        if (end.equals(start)) {
+            throw new BadRequestException("SHIFT_ZERO_DURATION: Giờ bắt đầu và kết thúc không được giống nhau");
         }
     }
 
     private int calcDuration(ShiftType type, LocalTime start, LocalTime end) {
-        if (type == ShiftType.OT_EMERGENCY && end.isBefore(start)) {
+        if (end.isBefore(start)) {
+            // Ca qua đêm
             int untilMidnight = (24 * 60) - (start.getHour() * 60 + start.getMinute());
             int afterMidnight = end.getHour() * 60 + end.getMinute();
             return untilMidnight + afterMidnight;
@@ -889,6 +923,9 @@ public class ShiftService {
                     ". Ca phải ở ASSIGNED, SCHEDULED hoặc CONFIRMED.");
         }
         if (shift.getCheckInTime() != null) {
+            if (shift.getCheckOutTime() != null) {
+                throw new BadRequestException("Ca làm việc này đã hoàn thành (đã check-out).");
+            }
             throw new BadRequestException("Ca này đã được check-in lúc " + shift.getCheckInTime());
         }
 
@@ -942,8 +979,26 @@ public class ShiftService {
 
         LocalDateTime now = LocalDateTime.now();
 
-        // Tính số phút thực tế làm việc
-        int actualMinutes = (int) java.time.temporal.ChronoUnit.MINUTES.between(shift.getCheckInTime(), now);
+        // Kiểm tra thời gian làm việc tối thiểu (ít nhất 1 phút)
+        if (now.isBefore(shift.getCheckInTime().plusMinutes(1))) {
+            throw new BadRequestException("Bạn chỉ có thể check-out sau ít nhất 1 phút kể từ khi check-in.");
+        }
+
+        // Nghiệp vụ mới: Nếu checkout sớm vẫn tính đủ số phút dự kiến của ca (durationMinutes)
+        LocalTime schedEndTime = shift.getEndTime();
+        LocalDate schedDate = shift.getShiftDate();
+        LocalDateTime schedEndDt = LocalDateTime.of(schedDate, schedEndTime);
+        if (schedEndTime.isBefore(shift.getStartTime())) {
+            schedEndDt = schedEndDt.plusDays(1); // Xử lý ca đêm
+        }
+
+        int actualMinutes;
+        if (now.isBefore(schedEndDt)) {
+            actualMinutes = shift.getDurationMinutes();
+            log.info("[SHIFT CHECK-OUT] Early checkout for shift={}. Using durationMinutes: {}", shiftId, actualMinutes);
+        } else {
+            actualMinutes = (int) java.time.temporal.ChronoUnit.MINUTES.between(shift.getCheckInTime(), now);
+        }
 
         shift.setCheckOutTime(now);
         shift.setCheckOutLat(request.getLatitude());

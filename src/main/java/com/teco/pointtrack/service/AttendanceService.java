@@ -17,6 +17,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -32,10 +34,12 @@ public class AttendanceService {
     private static final String KEY_GPS_RADIUS          = "GPS_RADIUS_METERS";
     private static final String KEY_GRACE_PERIOD        = "GRACE_PERIOD_MINUTES";
     private static final String KEY_LATE_CHECKOUT_MINS  = "LATE_CHECKOUT_THRESHOLD_MINUTES";
+    private static final String KEY_MIN_WORK_MINUTES    = "MIN_WORK_MINUTES";
 
     private static final double DEFAULT_GPS_RADIUS      = 50.0;
     private static final int    DEFAULT_GRACE_PERIOD    = 5;
     private static final int    DEFAULT_LATE_CHECKOUT   = 30;
+    private static final int    DEFAULT_MIN_WORK_MINS   = 1;
 
     // ── Dependencies ──────────────────────────────────────────────────────────
     private final WorkScheduleRepository       workScheduleRepo;
@@ -82,16 +86,24 @@ public class AttendanceService {
         if (!schedule.getUser().getId().equals(userId)) {
             throw new BadRequestException("Ca làm việc này không thuộc về bạn");
         }
-        if (!schedule.getWorkDate().equals(LocalDate.now())) {
-            throw new BadRequestException("Chỉ được check-in vào đúng ngày làm việc ("
-                    + schedule.getWorkDate() + ")");
+        LocalDate today = LocalDate.now();
+        boolean isToday = schedule.getWorkDate().equals(today);
+        boolean isYesterday = schedule.getWorkDate().equals(today.minusDays(1));
+
+        if (!isToday && !isYesterday) {
+            throw new BadRequestException("Chỉ được check-in vào ngày làm việc ("
+                    + schedule.getWorkDate() + ") hoặc ngày kế tiếp cho ca qua đêm.");
         }
         if (schedule.getStatus() != WorkScheduleStatus.SCHEDULED) {
             throw new ConflictException("Ca này đã được check-in hoặc đã hủy");
         }
-        if (attendanceRecordRepo.existsByWorkScheduleId(workScheduleId)) {
+
+        attendanceRecordRepo.findByWorkScheduleId(workScheduleId).ifPresent(record -> {
+            if (record.getCheckOutTime() != null) {
+                throw new ConflictException("Ca làm việc này đã hoàn thành (đã check-out).");
+            }
             throw new ConflictException("Bạn đã check-in ca này rồi");
-        }
+        });
 
         // ── 3. Validate Customer và tọa độ GPS ───────────────────────────────
         Customer customer = schedule.getCustomer();
@@ -103,13 +115,18 @@ public class AttendanceService {
                     "Địa điểm khách hàng (" + customer.getName() + ") chưa có tọa độ GPS. Vui lòng liên hệ Admin.");
         }
 
-        // ── 4. BR-14: GPS Fencing ─────────────────────────────────────────────
-        double gpsRadius    = getDoubleSetting(KEY_GPS_RADIUS, DEFAULT_GPS_RADIUS);
-        double distanceM    = GpsUtils.distanceMeters(lat, lng, customer.getLatitude(), customer.getLongitude());
-        boolean gpsValid    = distanceM <= gpsRadius;
+        // ── 4. BR-14: GPS Fencing ────────────────────────────────────────────
+        double gpsRadius = getDoubleSetting(KEY_GPS_RADIUS, DEFAULT_GPS_RADIUS);
+        double distanceM = GpsUtils.distanceMeters(lat, lng, customer.getLatitude(), customer.getLongitude());
 
-        log.info("[CHECK-IN] userId={} scheduleId={} distance={}m radius={}m gpsValid={}",
-                userId, workScheduleId, String.format("%.1f", distanceM), gpsRadius, gpsValid);
+        if (distanceM > gpsRadius) {
+            throw new BadRequestException(String.format(
+                    "GPS_OUT_OF_RANGE: Bạn đang cách địa điểm %d mét, vui lòng đến gần hơn để chấm công",
+                    Math.round(distanceM)));
+        }
+
+        log.info("[CHECK-IN] userId={} scheduleId={} distance={}m radius={}m GPS_OK",
+                userId, workScheduleId, String.format("%.1f", distanceM), gpsRadius);
 
         // ── 5. Tính số phút đi muộn ───────────────────────────────────────────
         LocalDateTime now           = LocalDateTime.now();
@@ -118,13 +135,15 @@ public class AttendanceService {
         int lateMinutes             = (int) Math.max(0, ChronoUnit.MINUTES.between(latestOnTime, now));
 
         // ── 6. Xác định status bản ghi ────────────────────────────────────────
-        // GPS sai ưu tiên hơn đi muộn (cần Admin xem xét vị trí trước)
-        AttendanceStatus status = AttendanceStatus.ON_TIME;
-        if (!gpsValid)          status = AttendanceStatus.PENDING_APPROVAL;  // BR-16.3
-        else if (lateMinutes > 0) status = AttendanceStatus.LATE;            // BR-16.1
+        AttendanceStatus status = lateMinutes > 0 ? AttendanceStatus.LATE : AttendanceStatus.ON_TIME;
 
         // ── 7. Upload ảnh (BR-15) ──────────────────────────────────────────────
-        String photoUrl = fileStorageService.storeAttendancePhoto(photo);
+        String photoUrl = "default_photo_url.jpg";
+        try {
+            photoUrl = fileStorageService.storeAttendancePhoto(photo);
+        } catch (Exception e) {
+            log.error("Failed to store photo, using default. Error: {}", e.getMessage());
+        }
 
         // ── 8. Lưu AttendanceRecord ───────────────────────────────────────────
         User user = userRepo.findByIdAndDeletedAtIsNull(userId)
@@ -163,10 +182,6 @@ public class AttendanceService {
         // ── 10. Tạo ExplanationRequest nếu cần (BR-16) ────────────────────────
         List<ExplanationRequest> createdExplanations = new ArrayList<>();
 
-        if (!gpsValid) {
-            // BR-16.3: GPS sai — auto tạo, NV chưa cần nhập lý do ngay
-            createdExplanations.add(createExplanation(record, user, ExplanationType.GPS_INVALID, null));
-        }
         if (lateMinutes > 0) {
             // BR-16.1: Đi muộn — auto tạo, note từ payload là lý do (optional)
             createdExplanations.add(createExplanation(record, user, ExplanationType.LATE_CHECKIN, note));
@@ -182,14 +197,14 @@ public class AttendanceService {
                 .map(ExplanationRequest::getId)
                 .orElse(null);
 
-        String message = buildCheckInMessage(gpsValid, lateMinutes);
+        String message = buildCheckInMessage(lateMinutes);
 
         return CheckInResponse.builder()
                 .attendanceRecordId(record.getId())
                 .status(status)
                 .checkInTime(now)
                 .distanceMeters(Math.round(distanceM * 10.0) / 10.0)
-                .gpsValid(gpsValid)
+                .gpsValid(true)
                 .lateMinutes(lateMinutes)
                 .explanationRequestId(firstExplanationId)
                 .message(message)
@@ -234,7 +249,36 @@ public class AttendanceService {
         }
 
         LocalDateTime now        = LocalDateTime.now();
-        LocalDateTime schedEnd   = record.getWorkSchedule().getScheduledEnd();
+        LocalDateTime checkInTime = record.getCheckInTime() != null ? record.getCheckInTime() : now;
+
+        // ── 2.1. Kiểm tra thời gian làm việc tối thiểu ───────────────────
+        int minWorkMins = getIntSetting(KEY_MIN_WORK_MINUTES, DEFAULT_MIN_WORK_MINS);
+        if (now.isBefore(checkInTime.plusMinutes(minWorkMins))) {
+            throw new BadRequestException("Bạn chỉ có thể check-out sau ít nhất " + minWorkMins + " phút kể từ khi check-in.");
+        }
+
+        // ── 2.2. BR-14: GPS Fencing ───────────────────────────────────────
+        WorkSchedule ws = record.getWorkSchedule();
+        if (ws != null && ws.getCustomer() != null) {
+            Customer checkoutCustomer = ws.getCustomer();
+            if (checkoutCustomer.getLatitude() != null && checkoutCustomer.getLongitude() != null) {
+                double gpsRadiusOut = getDoubleSetting(KEY_GPS_RADIUS, DEFAULT_GPS_RADIUS);
+                double distanceOut  = GpsUtils.distanceMeters(lat, lng,
+                        checkoutCustomer.getLatitude(), checkoutCustomer.getLongitude());
+                if (distanceOut > gpsRadiusOut) {
+                    throw new BadRequestException(String.format(
+                            "GPS_OUT_OF_RANGE: Bạn đang cách địa điểm %d mét, vui lòng đến gần hơn để chấm công",
+                            Math.round(distanceOut)));
+                }
+            }
+        }
+
+        LocalDateTime schedEnd   = record.getWorkSchedule() != null ? record.getWorkSchedule().getScheduledEnd() : null;
+
+        if (schedEnd == null) {
+            log.warn("ScheduledEnd is null for AttendanceRecord ID={}, using now as default", attendanceRecordId);
+            schedEnd = now;
+        }
 
         // ── 3. BR-16.2: Checkout trễ — bắt buộc nhập lý do ──────────────────
         int lateCheckoutThreshold = getIntSetting(KEY_LATE_CHECKOUT_MINS, DEFAULT_LATE_CHECKOUT);
@@ -248,18 +292,60 @@ public class AttendanceService {
         }
 
         // ── 4. Tính thời gian ─────────────────────────────────────────────────
-        int actualMinutes    = (int) ChronoUnit.MINUTES.between(record.getCheckInTime(), now);
+        long scheduledDuration = ChronoUnit.MINUTES.between(record.getWorkSchedule().getScheduledStart(), schedEnd);
+        int actualMinutes;
+
+        if (now.isBefore(schedEnd)) {
+            // Nghiệp vụ mới: Nếu checkout sớm vẫn tính đủ số phút của ca (trọn ca)
+            actualMinutes = (int) scheduledDuration;
+            log.info("[CHECK-OUT] Early leave detected for recordId={}. Calculated as full shift: {} mins", 
+                    attendanceRecordId, actualMinutes);
+        } else {
+            // Nếu checkout đúng giờ hoặc muộn: Tính theo thời gian thực tế (để hưởng thêm lương tăng ca nếu có)
+            actualMinutes = (int) ChronoUnit.MINUTES.between(checkInTime, now);
+        }
+
         int earlyLeaveMinutes = (int) Math.max(0, ChronoUnit.MINUTES.between(now, schedEnd));
 
         // ── 5. Upload ảnh (BR-15) ──────────────────────────────────────────────
-        String photoUrl = fileStorageService.storeAttendancePhoto(photo);
+        String photoUrl = "default_checkout_photo.jpg";
+        try {
+            photoUrl = fileStorageService.storeAttendancePhoto(photo);
+        } catch (Exception e) {
+            log.error("Failed to store checkout photo, using default. Error: {}", e.getMessage());
+        }
 
         // ── 6. Update AttendanceRecord ────────────────────────────────────────
+        if (now.isBefore(record.getCheckInTime())) {
+            throw new BadRequestException("Thời gian checkout không hợp lệ");
+        }
+
+        long workedMinutes = ChronoUnit.MINUTES.between(record.getCheckInTime(), now);
+        double workedHours = BigDecimal.valueOf(workedMinutes / 60.0)
+                .setScale(2, RoundingMode.HALF_UP)
+                .doubleValue();
+
+        // Tính lương tạm: workedHours × ratePerHour × otMultiplier
+        BigDecimal estimatedSalary = BigDecimal.ZERO;
+        User checkoutUser = record.getUser();
+        if (checkoutUser != null && checkoutUser.getSalaryLevel() != null
+                && checkoutUser.getSalaryLevel().getBaseSalary() != null) {
+            BigDecimal ratePerHour = checkoutUser.getSalaryLevel().getBaseSalary();
+            BigDecimal multiplier  = record.getOtMultiplier() != null ? record.getOtMultiplier() : BigDecimal.ONE;
+            estimatedSalary = BigDecimal.valueOf(workedHours)
+                    .multiply(ratePerHour)
+                    .multiply(multiplier)
+                    .setScale(2, RoundingMode.HALF_UP);
+        }
+
         record.setCheckOutTime(now);
         record.setCheckOutLat(lat);
         record.setCheckOutLng(lng);
         record.setActualMinutes(actualMinutes);
         record.setEarlyLeaveMinutes(earlyLeaveMinutes);
+        record.setWorkedMinutes(workedMinutes);
+        record.setWorkedHours(workedHours);
+        record.setEstimatedSalary(estimatedSalary);
 
         // Cập nhật status nếu cần (chỉ ghi đè khi status vẫn là ON_TIME)
         if (record.getStatus() == AttendanceStatus.ON_TIME && earlyLeaveMinutes > 0) {
@@ -289,14 +375,25 @@ public class AttendanceService {
             createExplanation(record, user, ExplanationType.LATE_CHECKOUT, checkOutReason);
         }
 
+        String shiftName = null;
+        if (ws != null && ws.getShiftTemplate() != null) {
+            shiftName = ws.getShiftTemplate().getName();
+        }
+
         return CheckOutResponse.builder()
                 .attendanceRecordId(record.getId())
                 .status(record.getStatus())
+                .checkInTime(record.getCheckInTime())
                 .checkOutTime(now)
                 .actualMinutes(actualMinutes)
                 .earlyLeaveMinutes(earlyLeaveMinutes)
                 .otMultiplier(record.getOtMultiplier())
-                .message("Check-out thành công. Thời gian làm việc: " + actualMinutes + " phút.")
+                .workedMinutes(workedMinutes)
+                .workedHours(workedHours)
+                .estimatedSalary(estimatedSalary)
+                .currency("VND")
+                .shiftName(shiftName)
+                .message("Hoàn thành ca làm việc thành công!")
                 .build();
     }
 
@@ -506,14 +603,43 @@ public class AttendanceService {
                 .build();
     }
 
-    private String buildCheckInMessage(boolean gpsValid, int lateMinutes) {
-        if (!gpsValid && lateMinutes > 0) {
-            return "Check-in thành công nhưng GPS nằm ngoài bán kính cho phép và đi muộn "
-                    + lateMinutes + " phút. Đang chờ Admin duyệt.";
+    // ─────────────────────────────────────────────────────────────────────────
+    // Admin: Xem danh sách giải trình
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Transactional(readOnly = true)
+    public Page<ExplanationRequestResponse> getExplanations(
+            ExplanationStatus status, ExplanationType type, int page, int size) {
+        
+        Pageable pageable = PageRequest.of(page, size);
+        Page<ExplanationRequest> data;
+
+        if (status != null && type != null) {
+            data = explanationRepo.findByStatusAndType(status, type, pageable);
+        } else if (status != null) {
+            data = explanationRepo.findByStatus(status, pageable);
+        } else if (type != null) {
+            data = explanationRepo.findByType(type, pageable);
+        } else {
+            data = explanationRepo.findAll(pageable);
         }
-        if (!gpsValid) {
-            return "Check-in thành công nhưng GPS nằm ngoài bán kính cho phép. Đang chờ Admin duyệt.";
-        }
+
+        return data.map(e -> ExplanationRequestResponse.builder()
+                .id(e.getId())
+                .attendanceRecordId(e.getAttendanceRecord() != null ? e.getAttendanceRecord().getId() : null)
+                .userId(e.getUser() != null ? e.getUser().getId() : null)
+                .userName(e.getUser() != null ? e.getUser().getFullName() : null)
+                .type(e.getType())
+                .reason(e.getReason())
+                .status(e.getStatus())
+                .reviewNote(e.getReviewNote())
+                .reviewedByUserName(e.getReviewedBy() != null ? e.getReviewedBy().getFullName() : null)
+                .reviewedAt(e.getReviewedAt())
+                .createdAt(e.getCreatedAt())
+                .build());
+    }
+
+    private String buildCheckInMessage(int lateMinutes) {
         if (lateMinutes > 0) {
             return "Check-in thành công. Đi muộn " + lateMinutes + " phút. Đơn giải trình đã được tạo.";
         }

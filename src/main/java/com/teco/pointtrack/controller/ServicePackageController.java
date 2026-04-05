@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/packages")
+@RequestMapping("/v1/packages")
 @RequiredArgsConstructor
 @Tag(name = "Service Package", description = "Gói dịch vụ định kỳ – tự động sinh ca theo recurrencePattern")
 public class ServicePackageController {

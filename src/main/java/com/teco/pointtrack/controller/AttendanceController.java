@@ -5,6 +5,8 @@ import com.teco.pointtrack.dto.attendance.*;
 import com.teco.pointtrack.dto.common.ApiResponse;
 import com.teco.pointtrack.dto.common.MessageResponse;
 import com.teco.pointtrack.entity.enums.AttendanceStatus;
+import com.teco.pointtrack.entity.enums.ExplanationStatus;
+import com.teco.pointtrack.entity.enums.ExplanationType;
 import com.teco.pointtrack.service.AttendanceService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -20,10 +22,9 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 
 @RestController
-@RequestMapping("/attendance")
+@RequestMapping("/v1/attendance")
 @RequiredArgsConstructor
 @SecurityRequirement(name = "bearerAuth")
 @Tag(name = "Attendance", description = "Chấm công — Check-in/Check-out & Giải trình")
@@ -54,6 +55,25 @@ public class AttendanceController {
         return ResponseEntity.ok(ApiResponse.success(data, "Lấy danh sách bản ghi chấm công thành công"));
     }
 
+    @Operation(
+        summary = "[Employee] Lịch sử chấm công của tôi",
+        description = "Trả về danh sách bản ghi chấm công của nhân viên đang đăng nhập."
+    )
+    @PreAuthorize("isAuthenticated()")
+    @GetMapping("/my-records")
+    public ResponseEntity<ApiResponse<Page<AttendanceRecordResponse>>> getMyRecords(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(required = false) AttendanceStatus status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        Long employeeId = AuthUtils.getUserDetail().getId();
+        Page<AttendanceRecordResponse> data = attendanceService.getAttendanceRecords(
+                employeeId, startDate, endDate, status, page, size);
+        return ResponseEntity.ok(ApiResponse.success(data, "Lấy lịch sử chấm công thành công"));
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // BR-14 + BR-15 + BR-16: Check-in
     // ─────────────────────────────────────────────────────────────────────────
@@ -70,17 +90,13 @@ public class AttendanceController {
     )
     @PostMapping(value = "/check-in", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<CheckInResponse>> checkIn(
-            @RequestParam Long workScheduleId,
-            @RequestParam Double lat,
-            @RequestParam Double lng,
-            @RequestParam(required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime capturedAt,
-            @RequestParam(required = false) String note,
+            @ModelAttribute @Valid CheckInRequest request,
             @RequestPart("photo") MultipartFile photo) {
 
         Long userId = AuthUtils.getUserDetail().getId();
         CheckInResponse result = attendanceService.checkIn(
-                workScheduleId, lat, lng, capturedAt, note, photo, userId);
+                request.getWorkScheduleId(), request.getLatitude(), request.getLongitude(),
+                request.getCapturedAt(), request.getNote(), photo, userId);
         return ResponseEntity.ok(ApiResponse.success(result, result.getMessage()));
     }
 
@@ -98,17 +114,13 @@ public class AttendanceController {
     )
     @PostMapping(value = "/check-out", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<CheckOutResponse>> checkOut(
-            @RequestParam Long attendanceRecordId,
-            @RequestParam Double lat,
-            @RequestParam Double lng,
-            @RequestParam(required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime capturedAt,
-            @RequestParam(required = false) String checkOutReason,
+            @ModelAttribute @Valid CheckOutRequest request,
             @RequestPart("photo") MultipartFile photo) {
 
         Long userId = AuthUtils.getUserDetail().getId();
         CheckOutResponse result = attendanceService.checkOut(
-                attendanceRecordId, lat, lng, capturedAt, checkOutReason, photo, userId);
+                request.getAttendanceRecordId(), request.getLatitude(), request.getLongitude(),
+                request.getCapturedAt(), request.getCheckOutReason(), photo, userId);
         return ResponseEntity.ok(ApiResponse.success(result, result.getMessage()));
     }
 
@@ -116,16 +128,29 @@ public class AttendanceController {
     // BR-16: Admin duyệt giải trình
     // ─────────────────────────────────────────────────────────────────────────
 
+    @Operation(summary = "[Admin] Danh sách đơn giải trình (phân trang + lọc)")
+    @PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/explanations")
+    public ResponseEntity<ApiResponse<Page<ExplanationRequestResponse>>> listExplanations(
+            @RequestParam(required = false) ExplanationStatus status,
+            @RequestParam(required = false) ExplanationType type,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+
+        Page<ExplanationRequestResponse> data = attendanceService.getExplanations(status, type, page, size);
+        return ResponseEntity.ok(ApiResponse.success(data, "Lấy danh sách đơn giải trình thành công"));
+    }
+
     @Operation(summary = "[Admin] Duyệt đơn giải trình")
     @PreAuthorize("hasRole('ADMIN')")
-    @PutMapping("/explanations/{id}/approve")
-    public ResponseEntity<MessageResponse> approveExplanation(
+    @PostMapping("/explanations/{id}/approve")
+    public ResponseEntity<ApiResponse<Void>> approveExplanation(
             @PathVariable Long id,
             @RequestBody ApprovalRequest req) {
 
         Long adminId = AuthUtils.getUserDetail().getId();
         attendanceService.approveExplanation(id, req, adminId);
-        return ResponseEntity.ok(new MessageResponse("Đã duyệt đơn giải trình."));
+        return ResponseEntity.ok(ApiResponse.success(null, "Duyệt giải trình thành công"));
     }
 
     @Operation(summary = "[Admin] Từ chối đơn giải trình")

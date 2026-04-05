@@ -145,26 +145,22 @@ public class ShiftTemplateService {
 
     /**
      * Validate rule BR-10:
-     * - NORMAL & HOLIDAY: end phải > start (chỉ trong ngày).
-     * - OT_EMERGENCY: cho phép end < start (qua đêm).
+     * - Tất cả loại ca: cho phép end < start (qua đêm).
+     * - end == start không hợp lệ (ca 0 phút).
      */
     private void validateShiftTime(ShiftType type, LocalTime start, LocalTime end) {
-        if (type == ShiftType.NORMAL || type == ShiftType.HOLIDAY) {
-            if (!end.isAfter(start)) {
-                throw new BadRequestException("SHIFT_TEMPLATE_OVERNIGHT_NOT_ALLOWED");
-            }
+        if (end.equals(start)) {
+            throw new BadRequestException("SHIFT_TEMPLATE_ZERO_DURATION: Giờ bắt đầu và kết thúc không được giống nhau");
         }
-        // OT_EMERGENCY: không giới hạn, end < start = qua đêm
     }
 
     /**
      * Tính duration (phút):
-     * - NORMAL/HOLIDAY: end - start (cùng ngày).
-     * - OT_EMERGENCY + end < start (qua đêm): (24h - start) + end.
-     * - OT_EMERGENCY + end >= start: end - start (không qua đêm).
+     * - end > start: ca trong ngày bình thường.
+     * - end < start: ca qua đêm → (24h - start) + end.
      */
     private int calculateDuration(ShiftType type, LocalTime start, LocalTime end) {
-        if (type == ShiftType.OT_EMERGENCY && end.isBefore(start)) {
+        if (end.isBefore(start)) {
             // Ca qua đêm: phút còn lại trong ngày + phút đầu ngày hôm sau
             int minutesUntilMidnight = (24 * 60) - (start.getHour() * 60 + start.getMinute());
             int minutesAfterMidnight = end.getHour() * 60 + end.getMinute();

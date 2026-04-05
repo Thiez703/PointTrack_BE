@@ -148,7 +148,8 @@ public class ConflictCheckerService {
     }
 
     LocalDateTime toAbsoluteEnd(LocalDate date, LocalTime start, LocalTime end, ShiftType type) {
-        if (type == ShiftType.OT_EMERGENCY && end.isBefore(start)) {
+        if (end.isBefore(start)) {
+            // Ca qua đêm (bất kể loại ca)
             return date.plusDays(1).atTime(end);
         }
         return date.atTime(end);

@@ -32,8 +32,10 @@ public class EmployeeProfileResponse {
     @Builder
     public static class Summary {
         private Long totalWorkDaysThisMonth;
+        private Double totalHoursThisMonth;
         private Double otHoursThisMonth;
         private Long lateDaysThisMonth;
+        private Long estimatedSalaryThisMonth;
     }
 
     @Data

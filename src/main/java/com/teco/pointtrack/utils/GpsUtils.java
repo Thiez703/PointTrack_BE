@@ -32,6 +32,11 @@ public final class GpsUtils {
         return EARTH_RADIUS_METERS * c;
     }
 
+    /** Alias cho {@link #distanceMeters} — tên phù hợp với spec BR-14. */
+    public static double calculateDistance(double lat1, double lng1, double lat2, double lng2) {
+        return distanceMeters(lat1, lng1, lat2, lng2);
+    }
+
     /**
      * Kiểm tra điểm (lat, lng) có nằm trong bán kính (meters) của tâm không.
      */

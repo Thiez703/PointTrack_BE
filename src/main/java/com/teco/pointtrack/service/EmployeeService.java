@@ -219,6 +219,7 @@ public class EmployeeService {
 
         LocalDate now = LocalDate.now();
         LocalDate monthStart = now.withDayOfMonth(1);
+        LocalDate monthEnd = now.with(java.time.temporal.TemporalAdjusters.lastDayOfMonth());
         LocalDateTime dtFrom = monthStart.atStartOfDay();
         LocalDateTime dtTo = now.plusDays(1).atStartOfDay();
 
@@ -227,10 +228,20 @@ public class EmployeeService {
         Double otHours = attendanceRepository.sumOtHoursByUserAndPeriod(userId, dtFrom, dtTo);
         long lateDays = attendanceRepository.countLateCheckinsByUserAndPeriod(userId, dtFrom, dtTo);
 
+        // BR-16.2: Tính tổng giờ làm và lương dựa trên work_date và thực tế
+        Long totalMinutes = attendanceRepository.sumActualMinutesByUserIdAndWorkDateBetween(userId, monthStart, monthEnd);
+        Double weightedMinutes = attendanceRepository.sumWeightedMinutesByUserIdAndWorkDateBetween(userId, monthStart, monthEnd);
+
+        double baseSalary = (user.getSalaryLevel() != null) ? user.getSalaryLevel().getBaseSalary().doubleValue() : 0.0;
+        double totalHoursVal = (totalMinutes != null) ? totalMinutes / 60.0 : 0.0;
+        long estimatedSalary = (weightedMinutes != null) ? Math.round(weightedMinutes / 60.0 * baseSalary) : 0L;
+
         EmployeeProfileResponse.Summary summary = EmployeeProfileResponse.Summary.builder()
                 .totalWorkDaysThisMonth(totalWorkDays)
+                .totalHoursThisMonth(Math.round(totalHoursVal * 10.0) / 10.0)
                 .otHoursThisMonth(otHours != null ? Math.round(otHours * 10.0) / 10.0 : 0.0)
                 .lateDaysThisMonth(lateDays)
+                .estimatedSalaryThisMonth(estimatedSalary)
                 .build();
 
         // 2. History for last 6 months

@@ -178,4 +178,22 @@ public interface ShiftRepository extends JpaRepository<Shift, Long> {
             ORDER BY s.shiftDate ASC, s.startTime ASC
             """)
     List<Shift> findOpenShifts(@Param("today") LocalDate today);
+
+    // ── My today shifts ───────────────────────────────────────────────────────
+
+    /**
+     * Lấy các ca làm việc của nhân viên trong một khoảng ngày (thường là hôm qua -> ngày mai).
+     * Dùng cho màn hình chấm công để hiển thị các ca hiện tại, ca qua đêm hoặc ca sắp tới.
+     */
+    @Query("""
+            SELECT s FROM Shift s
+            WHERE s.employee.id = :employeeId
+              AND s.shiftDate BETWEEN :startDate AND :endDate
+              AND s.status <> com.teco.pointtrack.entity.enums.ShiftStatus.CANCELLED
+            ORDER BY s.shiftDate ASC, s.startTime ASC
+            """)
+    List<Shift> findRelevantShifts(
+            @Param("employeeId") Long employeeId,
+            @Param("startDate")  LocalDate startDate,
+            @Param("endDate")    LocalDate endDate);
 }

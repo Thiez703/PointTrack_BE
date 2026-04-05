@@ -34,7 +34,24 @@
       "Bash(sed -i 's|@RequestMapping\\(\"\"/v1/customers\"\"\\)|@RequestMapping\\(\"\"/customers\"\"\\)|g' src/main/java/com/teco/pointtrack/controller/CustomerController.java)",
       "Bash(sed -i 's|@RequestMapping\\(\"\"/v1/packages\"\"\\)|@RequestMapping\\(\"\"/packages\"\"\\)|g' src/main/java/com/teco/pointtrack/controller/ServicePackageController.java)",
       "Bash(sed -i 's|@RequestMapping\\(\"\"/v1/files\"\"\\)|@RequestMapping\\(\"\"/files\"\"\\)|g' src/main/java/com/teco/pointtrack/controller/FileUploadController.java)",
-      "Bash(sed -i 's|@RequestMapping\\(\"\"/v1/scheduling/settings\"\"\\)|@RequestMapping\\(\"\"/scheduling/settings\"\"\\)|g' src/main/java/com/teco/pointtrack/controller/SchedulingSettingsController.java)"
+      "Bash(sed -i 's|@RequestMapping\\(\"\"/v1/scheduling/settings\"\"\\)|@RequestMapping\\(\"\"/scheduling/settings\"\"\\)|g' src/main/java/com/teco/pointtrack/controller/SchedulingSettingsController.java)",
+      "Bash(docker compose:*)",
+      "Bash(docker exec:*)",
+      "Bash(node:*)",
+      "Bash(curl -s -X POST http://localhost:8081/api/auth/login -H \"Content-Type: application/json\" -d '{\"\"\"\"phoneNumber\"\"\"\":\"\"\"\"0123456789\"\"\"\",\"\"\"\"password\"\"\"\":\"\"\"\"Admin@123\"\"\"\",\"\"\"\"captchaToken\"\"\"\":\"\"\"\"1x0000000000000000000000000000000AA\"\"\"\"}')",
+      "Bash(curl -s -X POST http://localhost:8081/api/auth/login -H \"Content-Type: application/json\" -d '{\"\"\"\"phoneNumber\"\"\"\":\"\"\"\"0987654321\"\"\"\",\"\"\"\"password\"\"\"\":\"\"\"\"Admin@123\"\"\"\",\"\"\"\"captchaToken\"\"\"\":\"\"\"\"1x0000000000000000000000000000000AA\"\"\"\"}')",
+      "Bash(find . -name V1*.sql -o -name *seed*.sql -o -name *init*.sql)",
+      "Bash(curl -s -X POST http://localhost:8081/api/auth/login -H \"Content-Type: application/json\" -d '{\"\"\"\"phoneNumber\"\"\"\":\"\"\"\"0987654321\"\"\"\",\"\"\"\"password\"\"\"\":\"\"\"\"123456\"\"\"\",\"\"\"\"captchaToken\"\"\"\":\"\"\"\"1x0000000000000000000000000000000AA\"\"\"\"}')",
+      "Bash(curl -s -X POST http://localhost:8081/api/auth/login -H \"Content-Type: application/json\" -d '{\"\"\"\"phoneNumber\"\"\"\":\"\"\"\"0123456789\"\"\"\",\"\"\"\"password\"\"\"\":\"\"\"\"123456\"\"\"\",\"\"\"\"captchaToken\"\"\"\":\"\"\"\"1x0000000000000000000000000000000AA\"\"\"\"}')",
+      "Bash(find /d/ThiezDuAn/PointTrack_BE/src/test -type f -name *.java)",
+      "Bash(./mvnw clean:*)",
+      "Bash(mvn clean:*)",
+      "Bash(cmd.exe /c \"cd /d D:\\\\ThiezDuAn\\\\PointTrack_BE && mvnw.cmd clean package -DskipTests -q 2>&1\")",
+      "Bash(java -version)",
+      "Bash(cmd.exe /c \"mvnw.cmd clean package -DskipTests\")",
+      "Bash(cmd.exe /c \"mvnw.cmd clean package -DskipTests 2>&1\")",
+      "Bash(powershell.exe -Command \"& .\\\\mvnw.cmd clean package -DskipTests\")",
+      "Bash(npx tsc:*)"
     ]
   }
 }
