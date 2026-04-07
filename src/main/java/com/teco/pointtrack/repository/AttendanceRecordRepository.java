@@ -63,15 +63,15 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
             @Param("from")   LocalDateTime from,
             @Param("to")     LocalDateTime to);
 
-    /** Tính tổng số giờ OT trong khoảng thời gian (dựa trên actualMinutes và otMultiplier) */
+    /** Tính tổng số giờ OT trong khoảng thời gian (ưu tiên workedMinutes, fallback actualMinutes). */
     @Query("""
-            SELECT SUM((CAST(a.actualMinutes AS double) / 60.0) * (a.otMultiplier - 1.0))
+            SELECT SUM((CAST(COALESCE(a.workedMinutes, a.actualMinutes) AS double) / 60.0) * (a.otMultiplier - 1.0))
             FROM AttendanceRecord a
             WHERE a.user.id = :userId
               AND a.checkInTime >= :from
               AND a.checkInTime < :to
               AND a.otMultiplier > 1.0
-              AND a.actualMinutes IS NOT NULL
+              AND COALESCE(a.workedMinutes, a.actualMinutes) IS NOT NULL
             """)
     Double sumOtHoursByUserAndPeriod(
             @Param("userId") Long userId,
@@ -80,12 +80,12 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
 
     /** Tính tổng số phút làm việc thực tế trong khoảng thời gian */
     @Query("""
-            SELECT SUM(a.actualMinutes)
+            SELECT SUM(COALESCE(a.workedMinutes, a.actualMinutes))
             FROM AttendanceRecord a
             WHERE a.user.id = :userId
               AND a.checkInTime >= :from
               AND a.checkInTime < :to
-              AND a.actualMinutes IS NOT NULL
+              AND COALESCE(a.workedMinutes, a.actualMinutes) IS NOT NULL
             """)
     Long sumActualMinutesByUserAndPeriod(
             @Param("userId") Long userId,
@@ -94,13 +94,13 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
 
     /** Tính tổng actualMinutes theo workDate (BR-16.2) */
     @Query("""
-            SELECT SUM(a.actualMinutes)
+            SELECT SUM(COALESCE(a.workedMinutes, a.actualMinutes))
             FROM AttendanceRecord a
             JOIN a.workSchedule ws
             WHERE a.user.id = :userId
               AND ws.workDate >= :startDate
               AND ws.workDate <= :endDate
-              AND a.actualMinutes IS NOT NULL
+              AND COALESCE(a.workedMinutes, a.actualMinutes) IS NOT NULL
             """)
     Long sumActualMinutesByUserIdAndWorkDateBetween(
             @Param("userId") Long userId,
@@ -109,13 +109,13 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
 
     /** Tính tổng số phút làm việc có nhân hệ số OT theo workDate (BR-16.2) */
     @Query("""
-            SELECT SUM(CAST(a.actualMinutes AS double) * CAST(a.otMultiplier AS double))
+            SELECT SUM(CAST(COALESCE(a.workedMinutes, a.actualMinutes) AS double) * CAST(a.otMultiplier AS double))
             FROM AttendanceRecord a
             JOIN a.workSchedule ws
             WHERE a.user.id = :userId
               AND ws.workDate >= :startDate
               AND ws.workDate <= :endDate
-              AND a.actualMinutes IS NOT NULL
+              AND COALESCE(a.workedMinutes, a.actualMinutes) IS NOT NULL
             """)
     Double sumWeightedMinutesByUserIdAndWorkDateBetween(
             @Param("userId") Long userId,
@@ -124,14 +124,14 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
 
     /** Tính tổng lương dự kiến (số giờ * hệ số OT * lương cơ bản của cấp bậc tại thời điểm đó) */
     @Query("""
-            SELECT SUM(CAST(a.actualMinutes AS double) / 60.0 * a.otMultiplier * CAST(sl.baseSalary AS double))
+            SELECT SUM(CAST(COALESCE(a.workedMinutes, a.actualMinutes) AS double) / 60.0 * a.otMultiplier * CAST(sl.baseSalary AS double))
             FROM AttendanceRecord a
             JOIN a.user u
             JOIN u.salaryLevel sl
             WHERE u.id = :userId
               AND a.checkInTime >= :from
               AND a.checkInTime < :to
-              AND a.actualMinutes IS NOT NULL
+              AND COALESCE(a.workedMinutes, a.actualMinutes) IS NOT NULL
             """)
     Double sumSalaryByUserAndPeriod(
             @Param("userId") Long userId,

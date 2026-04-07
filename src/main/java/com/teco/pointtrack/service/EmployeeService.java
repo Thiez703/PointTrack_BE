@@ -18,6 +18,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -234,11 +236,12 @@ public class EmployeeService {
 
         double baseSalary = (user.getSalaryLevel() != null) ? user.getSalaryLevel().getBaseSalary().doubleValue() : 0.0;
         double totalHoursVal = (totalMinutes != null) ? totalMinutes / 60.0 : 0.0;
+        double roundedTotalHours = BigDecimal.valueOf(totalHoursVal).setScale(2, RoundingMode.HALF_UP).doubleValue();
         long estimatedSalary = (weightedMinutes != null) ? Math.round(weightedMinutes / 60.0 * baseSalary) : 0L;
 
         EmployeeProfileResponse.Summary summary = EmployeeProfileResponse.Summary.builder()
                 .totalWorkDaysThisMonth(totalWorkDays)
-                .totalHoursThisMonth(Math.round(totalHoursVal * 10.0) / 10.0)
+                .totalHoursThisMonth(roundedTotalHours)
                 .otHoursThisMonth(otHours != null ? Math.round(otHours * 10.0) / 10.0 : 0.0)
                 .lateDaysThisMonth(lateDays)
                 .estimatedSalaryThisMonth(estimatedSalary)
