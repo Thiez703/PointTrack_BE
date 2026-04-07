@@ -107,6 +107,8 @@ public class AttendanceController {
     @Operation(
         summary = "Check-out ca làm việc",
         description = """
+            **NEW**: Chỉ được checkout sau khi đã làm ít nhất 50% thời lượng ca.
+            **BR-14**: Validate GPS trong bán kính `GPS_RADIUS_METERS` (mặc định 50m).
             **BR-15**: Ảnh bắt buộc.
             **BR-16.2**: Nếu checkout quá `LATE_CHECKOUT_THRESHOLD_MINUTES` (mặc định 30 phút)
             sau giờ kết thúc ca → `checkOutReason` là BẮT BUỘC.

@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
@@ -49,6 +50,13 @@ public class AttendanceService {
     private static final int    DEFAULT_GRACE_PERIOD    = 15;
     private static final int    DEFAULT_LATE_CHECKOUT   = 30;
     private static final int    DEFAULT_MIN_WORK_MINS   = 1;
+
+    // TEMP: Bỏ qua check GPS để test nghiệp vụ lương.
+    private static final boolean TEMP_BYPASS_GPS_VALIDATION = true;
+    // TEMP: Bỏ qua rule chỉ checkout sau >=50% thời lượng ca để test nghiệp vụ lương.
+    private static final boolean TEMP_BYPASS_MIN_CHECKOUT_RULE = true;
+    // TEMP: Bỏ qua yêu cầu nhập lý do khi checkout muộn để test nghiệp vụ lương.
+    private static final boolean TEMP_BYPASS_LATE_CHECKOUT_REASON = true;
 
     // ── Ranh giới giờ để phân loại ca (morning/afternoon/night) ──────────────
     private static final LocalTime MORNING_FROM   = LocalTime.of(5,  0);
@@ -301,31 +309,49 @@ public class AttendanceService {
             throw new ConflictException("Bạn đã check-out ca này rồi");
         }
 
-        LocalDateTime now        = LocalDateTime.now();
+        LocalDateTime now         = LocalDateTime.now(ZoneId.of("Asia/Ho_Chi_Minh"));
         LocalDateTime checkInTime = record.getCheckInTime() != null ? record.getCheckInTime() : now;
 
-        // ── 2.1. Kiểm tra thời gian làm việc tối thiểu ───────────────────
-        /*
-        int minWorkMins = getIntSetting(KEY_MIN_WORK_MINUTES, DEFAULT_MIN_WORK_MINS);
-        if (now.isBefore(checkInTime.plusMinutes(minWorkMins))) {
-            throw new BadRequestException("Bạn chỉ có thể check-out sau ít nhất " + minWorkMins + " phút kể từ khi check-in.");
-        }
-        */
+        // ── 2.1. Chỉ được checkout sau khi đã làm >= 50% thời lượng ca ─────
+        long workedMinutesBeforeCheckout = Math.max(0, ChronoUnit.MINUTES.between(checkInTime, now));
+        int minRequiredCheckoutMinutes = resolveMinimumCheckoutMinutes(ws);
 
-        // ── 2.2. BR-14: GPS Fencing ───────────────────────────────────────
+        if (!TEMP_BYPASS_MIN_CHECKOUT_RULE && workedMinutesBeforeCheckout < minRequiredCheckoutMinutes) {
+            throw new BadRequestException(String.format(
+                    "Bạn chỉ có thể check-out sau khi đã làm ít nhất %d phút (50%% thời lượng ca). Hiện tại mới làm %d phút.",
+                    minRequiredCheckoutMinutes,
+                    workedMinutesBeforeCheckout));
+        }
+
+        if (TEMP_BYPASS_MIN_CHECKOUT_RULE && workedMinutesBeforeCheckout < minRequiredCheckoutMinutes) {
+            log.warn("[TEMP_BYPASS_MIN_CHECKOUT] Checkout recordId={} before 50% rule: worked={}m, required={}m.",
+                attendanceRecordId,
+                workedMinutesBeforeCheckout,
+                minRequiredCheckoutMinutes);
+        }
+
+        // ── 2.2. BR-14: GPS Fencing khi check-out ─────────────────────────
+        double checkOutDistanceMeters = 0.0;
         if (ws != null && ws.getCustomer() != null) {
             Customer checkoutCustomer = ws.getCustomer();
             if (checkoutCustomer.getLatitude() != null && checkoutCustomer.getLongitude() != null) {
                 double gpsRadiusOut = getDoubleSetting(KEY_GPS_RADIUS, DEFAULT_GPS_RADIUS);
-                double distanceOut  = GpsUtils.distanceMeters(lat, lng,
+                checkOutDistanceMeters = GpsUtils.distanceMeters(lat, lng,
                         checkoutCustomer.getLatitude(), checkoutCustomer.getLongitude());
-                /*
-                if (distanceOut > gpsRadiusOut) {
+
+                if (!TEMP_BYPASS_GPS_VALIDATION && checkOutDistanceMeters > gpsRadiusOut) {
                     throw new BadRequestException(String.format(
-                            "GPS_OUT_OF_RANGE: Bạn đang cách địa điểm %d mét, vui lòng đến gần hơn để chấm công",
-                            Math.round(distanceOut)));
+                            "GPS_OUT_OF_RANGE: Bạn đang cách địa điểm %d mét, bán kính cho phép: %d mét.",
+                            Math.round(checkOutDistanceMeters),
+                            Math.round(gpsRadiusOut)));
                 }
-                */
+
+                if (TEMP_BYPASS_GPS_VALIDATION && checkOutDistanceMeters > gpsRadiusOut) {
+                    log.warn("[TEMP_BYPASS_GPS] Checkout recordId={} out-of-range {}m (allowed {}m) but still accepted.",
+                            attendanceRecordId,
+                            Math.round(checkOutDistanceMeters),
+                            Math.round(gpsRadiusOut));
+                }
             }
         }
 
@@ -340,27 +366,26 @@ public class AttendanceService {
         int lateCheckoutThreshold = getIntSetting(KEY_LATE_CHECKOUT_MINS, DEFAULT_LATE_CHECKOUT);
         long minutesAfterEnd      = ChronoUnit.MINUTES.between(schedEnd, now);
         boolean isLateCheckout    = minutesAfterEnd > lateCheckoutThreshold;
+        String effectiveCheckOutReason = checkOutReason;
 
-        if (isLateCheckout && (checkOutReason == null || checkOutReason.isBlank())) {
+        if (!TEMP_BYPASS_LATE_CHECKOUT_REASON && isLateCheckout
+            && (checkOutReason == null || checkOutReason.isBlank())) {
             throw new BadRequestException(
                     "Checkout quá " + lateCheckoutThreshold + " phút sau giờ kết thúc ca. "
                     + "Vui lòng nhập lý do vào trường checkOutReason (BR-16.2)");
         }
 
-        // ── 4. Tính thời gian ─────────────────────────────────────────────────
-        long scheduledDuration = ChronoUnit.MINUTES.between(record.getWorkSchedule().getScheduledStart(), schedEnd);
-        int actualMinutes;
-
-        if (now.isBefore(schedEnd)) {
-            // Nghiệp vụ mới: Nếu checkout sớm vẫn tính đủ số phút của ca (trọn ca)
-            actualMinutes = (int) scheduledDuration;
-            log.info("[CHECK-OUT] Early leave detected for recordId={}. Calculated as full shift: {} mins", 
-                    attendanceRecordId, actualMinutes);
-        } else {
-            // Nếu checkout đúng giờ hoặc muộn: Tính theo thời gian thực tế (để hưởng thêm lương tăng ca nếu có)
-            actualMinutes = (int) ChronoUnit.MINUTES.between(checkInTime, now);
+        if (TEMP_BYPASS_LATE_CHECKOUT_REASON && isLateCheckout
+            && (checkOutReason == null || checkOutReason.isBlank())) {
+            effectiveCheckOutReason = "TEMP_BYPASS_LATE_CHECKOUT_REASON";
+            log.warn("[TEMP_BYPASS_LATE_CHECKOUT_REASON] recordId={} late {}m but no reason required.",
+                attendanceRecordId,
+                minutesAfterEnd);
         }
 
+        // ── 4. Tính thời gian làm thực tế ─────────────────────────────────────
+        long workedMinutes = Math.max(0, ChronoUnit.MINUTES.between(checkInTime, now));
+        int actualMinutes = (int) workedMinutes;
         int earlyLeaveMinutes = (int) Math.max(0, ChronoUnit.MINUTES.between(now, schedEnd));
 
         // ── 5. Upload ảnh (BR-15) ──────────────────────────────────────────────
@@ -382,27 +407,13 @@ public class AttendanceService {
             workScheduleRepo.save(ws);
         }
 
-        long workedMinutes = ChronoUnit.MINUTES.between(record.getCheckInTime(), now);
-        double workedHours = BigDecimal.valueOf(workedMinutes / 60.0)
-                .setScale(2, RoundingMode.HALF_UP)
-                .doubleValue();
-
-        // Tính lương tạm: workedHours × ratePerHour × otMultiplier
-        BigDecimal estimatedSalary = BigDecimal.ZERO;
-        User checkoutUser = record.getUser();
-        if (checkoutUser != null && checkoutUser.getSalaryLevel() != null
-                && checkoutUser.getSalaryLevel().getBaseSalary() != null) {
-            BigDecimal ratePerHour = checkoutUser.getSalaryLevel().getBaseSalary();
-            BigDecimal multiplier  = record.getOtMultiplier() != null ? record.getOtMultiplier() : BigDecimal.ONE;
-            estimatedSalary = BigDecimal.valueOf(workedHours)
-                    .multiply(ratePerHour)
-                    .multiply(multiplier)
-                    .setScale(2, RoundingMode.HALF_UP);
-        }
+        double workedHours = calculateWorkedHours(workedMinutes);
+        BigDecimal estimatedSalary = calculateEstimatedSalary(record.getUser(), workedMinutes, record.getOtMultiplier());
 
         record.setCheckOutTime(now);
         record.setCheckOutLat(lat);
         record.setCheckOutLng(lng);
+        record.setCheckOutDistanceMeters(checkOutDistanceMeters);
         record.setActualMinutes(actualMinutes);
         record.setEarlyLeaveMinutes(earlyLeaveMinutes);
         record.setWorkedMinutes(workedMinutes);
@@ -434,7 +445,7 @@ public class AttendanceService {
         // ── 8. Tạo ExplanationRequest cho checkout trễ (BR-16.2) ─────────────
         if (isLateCheckout) {
             User user = record.getUser();
-            createExplanation(record, user, ExplanationType.LATE_CHECKOUT, checkOutReason);
+            createExplanation(record, user, ExplanationType.LATE_CHECKOUT, effectiveCheckOutReason);
         }
 
         return CheckOutResponse.builder()
@@ -536,13 +547,39 @@ public class AttendanceService {
             throw new BadRequestException("Không có trường nào thay đổi");
         }
 
-        // Tính lại actualMinutes nếu cả 2 mốc thời gian đã có
+        // Tính lại actual/worked/salary nếu cả 2 mốc thời gian đã có
         if (record.getCheckInTime() != null && record.getCheckOutTime() != null) {
+            if (record.getCheckOutTime().isBefore(record.getCheckInTime())) {
+                throw new BadRequestException("checkOutTime phải lớn hơn hoặc bằng checkInTime");
+            }
+
             int newActual = (int) ChronoUnit.MINUTES.between(
                     record.getCheckInTime(), record.getCheckOutTime());
             logs.add(buildAuditLog(recordId, adminId, "actualMinutes",
                     str(record.getActualMinutes()), str(newActual), req.getReason()));
             record.setActualMinutes(newActual);
+
+            long newWorkedMinutes = Math.max(0, newActual);
+            if (!Objects.equals(record.getWorkedMinutes(), newWorkedMinutes)) {
+                logs.add(buildAuditLog(recordId, adminId, "workedMinutes",
+                        str(record.getWorkedMinutes()), str(newWorkedMinutes), req.getReason()));
+            }
+            record.setWorkedMinutes(newWorkedMinutes);
+
+            double newWorkedHours = calculateWorkedHours(newWorkedMinutes);
+            if (!Objects.equals(record.getWorkedHours(), newWorkedHours)) {
+                logs.add(buildAuditLog(recordId, adminId, "workedHours",
+                        str(record.getWorkedHours()), str(newWorkedHours), req.getReason()));
+            }
+            record.setWorkedHours(newWorkedHours);
+
+            BigDecimal newEstimatedSalary = calculateEstimatedSalary(
+                    record.getUser(), newWorkedMinutes, record.getOtMultiplier());
+            if (!Objects.equals(record.getEstimatedSalary(), newEstimatedSalary)) {
+                logs.add(buildAuditLog(recordId, adminId, "estimatedSalary",
+                        str(record.getEstimatedSalary()), str(newEstimatedSalary), req.getReason()));
+            }
+            record.setEstimatedSalary(newEstimatedSalary);
         }
 
         attendanceRecordRepo.save(record);
@@ -713,6 +750,62 @@ public class AttendanceService {
         return systemSettingRepo.findById(key)
                 .map(s -> Integer.parseInt(s.getValue()))
                 .orElse(defaultVal);
+    }
+
+    private int resolveMinimumCheckoutMinutes(WorkSchedule ws) {
+        int scheduledDurationMinutes = resolveScheduledDurationMinutes(ws);
+        if (scheduledDurationMinutes > 0) {
+            return Math.max(1, (int) Math.ceil(scheduledDurationMinutes / 2.0));
+        }
+
+        int fallbackMinWorkMinutes = getIntSetting(KEY_MIN_WORK_MINUTES, DEFAULT_MIN_WORK_MINS);
+        return Math.max(1, fallbackMinWorkMinutes);
+    }
+
+    private int resolveScheduledDurationMinutes(WorkSchedule ws) {
+        if (ws == null) {
+            return 0;
+        }
+
+        if (ws.getScheduledStart() != null && ws.getScheduledEnd() != null) {
+            long minutes = ChronoUnit.MINUTES.between(ws.getScheduledStart(), ws.getScheduledEnd());
+            if (minutes <= 0) {
+                minutes += 24 * 60;
+            }
+            return (int) Math.max(0, minutes);
+        }
+
+        if (ws.getWorkDate() != null && ws.getStartTime() != null && ws.getEndTime() != null) {
+            LocalDateTime start = LocalDateTime.of(ws.getWorkDate(), ws.getStartTime());
+            LocalDateTime end = LocalDateTime.of(ws.getWorkDate(), ws.getEndTime());
+            if (!end.isAfter(start)) {
+                end = end.plusDays(1);
+            }
+            return (int) Math.max(0, ChronoUnit.MINUTES.between(start, end));
+        }
+
+        return 0;
+    }
+
+    private double calculateWorkedHours(long workedMinutes) {
+        return BigDecimal.valueOf(Math.max(0, workedMinutes))
+                .divide(BigDecimal.valueOf(60), 2, RoundingMode.HALF_UP)
+                .doubleValue();
+    }
+
+    private BigDecimal calculateEstimatedSalary(User user, long workedMinutes, BigDecimal otMultiplier) {
+        if (workedMinutes <= 0 || user == null || user.getSalaryLevel() == null
+                || user.getSalaryLevel().getBaseSalary() == null) {
+            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        }
+
+        BigDecimal ratePerHour = user.getSalaryLevel().getBaseSalary();
+        BigDecimal multiplier = otMultiplier != null ? otMultiplier : BigDecimal.ONE;
+
+        return BigDecimal.valueOf(workedMinutes)
+                .multiply(ratePerHour)
+                .multiply(multiplier)
+                .divide(BigDecimal.valueOf(60), 2, RoundingMode.HALF_UP);
     }
 
     private String str(Object val) {
