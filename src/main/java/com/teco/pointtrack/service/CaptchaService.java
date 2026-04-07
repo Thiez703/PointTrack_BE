@@ -23,7 +23,7 @@ public class CaptchaService {
     @Value("${app.turnstile.url}")
     private String verifyUrl;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
 
     public boolean verifyCaptcha(String token, HttpServletRequest servletRequest) {
 
