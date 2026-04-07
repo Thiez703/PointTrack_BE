@@ -150,9 +150,8 @@ public class AuthService {
         if (!captchaService.verifyCaptcha(request.getCaptchaToken(), httpRequest)) {
             throw new BadRequestException("Xác thực Captcha thất bại");
         }
-        String phoneNumber = request.getPhoneNumber().trim();
-        User user = userRepository.findByPhoneNumberAndDeletedAtIsNull(phoneNumber)
-                .orElseThrow(() -> new CustomAuthenticationException("Thông tin đăng nhập không hợp lệ"));
+        String contact = request.getContact().trim();
+        User user = findUserByContact(contact);
 
         if (user.getStatus() == UserStatus.INACTIVE) {
             throw new CustomAuthenticationException("Tài khoản đã bị vô hiệu hóa");
@@ -166,7 +165,7 @@ public class AuthService {
         user.setLastLoginIp(getClientIp(httpRequest));
         userRepository.save(user);
 
-        CustomUserDetail userDetails = (CustomUserDetail) userDetailsService.loadUserByUsername(phoneNumber);
+        CustomUserDetail userDetails = (CustomUserDetail) userDetailsService.loadUserByUsername(contact);
 
         return AuthResponse.builder()
                 .accessToken(jwtUtils.generateAccessToken(userDetails))
@@ -179,6 +178,16 @@ public class AuthService {
                 .role(user.getRole() != null ? user.getRole().getSlug() : null)
                 .forcePasswordChange(user.isFirstLogin())
                 .build();
+    }
+
+    private User findUserByContact(String contact) {
+        // 1. Thử tìm theo Email
+        var userByEmail = userRepository.findByEmailAndDeletedAtIsNull(contact);
+        if (userByEmail.isPresent()) return userByEmail.get();
+
+        // 2. Thử tìm theo Số điện thoại
+        return userRepository.findByPhoneNumberAndDeletedAtIsNull(contact)
+                .orElseThrow(() -> new CustomAuthenticationException("Thông tin đăng nhập không hợp lệ"));
     }
 
     @Transactional
@@ -198,6 +207,7 @@ public class AuthService {
 
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
         user.setFirstLogin(false);
+        user.setPasswordChangedAt(LocalDateTime.now());
         userRepository.save(user);
 
         CustomUserDetail userDetails = (CustomUserDetail) userDetailsService.loadUserByUsername(user.getPhoneNumber());
@@ -217,23 +227,32 @@ public class AuthService {
 
     @Transactional
     public void forgotPassword(ForgotPasswordRequest request) {
-        String phone = request.getPhoneNumber().trim();
-        userRepository.findByPhoneNumberAndDeletedAtIsNull(phone).ifPresent(user -> {
+        String contact = request.getContact().trim();
+        userRepository.findByEmailAndDeletedAtIsNull(contact).ifPresent(user -> {
+            sendOtp(user);
+        });
+        userRepository.findByPhoneNumberAndDeletedAtIsNull(contact).ifPresent(user -> {
+            sendOtp(user);
+        });
+        // Luôn trả 200 để không tiết lộ thông tin người dùng
+    }
+
+    private void sendOtp(User user) {
+        String phone = user.getPhoneNumber();
+        if (phone != null) {
             String otp = String.format("%06d", new Random().nextInt(999999));
             user.setOtpCode(otp);
             user.setOtpExpiredAt(LocalDateTime.now().plusMinutes(15));
             user.setOtpVerified(false);
             userRepository.save(user);
             smsService.sendOtp(phone, otp);
-        });
-        // Luôn trả 200 để không tiết lộ số điện thoại có tồn tại không
+        }
     }
 
     @Transactional
     public VerifyOtpResponse verifyOtp(VerifyOtpRequest request) {
-        String phone = request.getPhoneNumber().trim();
-        User user = userRepository.findByPhoneNumberAndDeletedAtIsNull(phone)
-                .orElseThrow(() -> new BadRequestException("OTP không hợp lệ"));
+        String contact = request.getContact().trim();
+        User user = findUserByContact(contact);
 
         if (user.getOtpCode() == null || !user.getOtpCode().equals(request.getOtp())) {
             throw new BadRequestException("OTP không đúng");
@@ -273,6 +292,8 @@ public class AuthService {
         validatePasswordPolicy(request.getNewPassword());
 
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        user.setFirstLogin(false);
+        user.setPasswordChangedAt(LocalDateTime.now());
         user.setResetPasswordToken(null);
         user.setResetTokenExpiredAt(null);
         user.setOtpVerified(null);
@@ -296,6 +317,7 @@ public class AuthService {
         validatePasswordPolicy(request.getNewPassword());
 
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        user.setPasswordChangedAt(LocalDateTime.now());
         userRepository.save(user);
     }
 
@@ -333,6 +355,9 @@ public class AuthService {
         }
 
         String phoneNumber = jwtUtils.extractUsername(refreshToken);
+        User user = userRepository.findByPhoneNumberAndDeletedAtIsNull(phoneNumber)
+                .orElseThrow(() -> new CustomAuthenticationException("Không tìm thấy người dùng"));
+
         CustomUserDetail userDetails = (CustomUserDetail) userDetailsService.loadUserByUsername(phoneNumber);
 
         jwtUtils.revokeToken(refreshToken);
@@ -340,6 +365,13 @@ public class AuthService {
         return AuthResponse.builder()
                 .accessToken(jwtUtils.generateAccessToken(userDetails))
                 .refreshToken(jwtUtils.generateRefreshToken(userDetails))
+                .userId(user.getId())
+                .fullName(user.getFullName())
+                .email(user.getEmail())
+                .phoneNumber(user.getPhoneNumber())
+                .avatarUrl(user.getAvatarUrl())
+                .role(user.getRole() != null ? user.getRole().getSlug() : null)
+                .forcePasswordChange(user.isFirstLogin())
                 .build();
     }
 

@@ -52,7 +52,7 @@ public class OpenApiConfig {
     public GroupedOpenApi authApi() {
         return GroupedOpenApi.builder()
                 .group("1. Authentication")
-                .pathsToMatch("/auth/**", "/v1/auth/**")
+                .pathsToMatch("/auth/**")
                 .build();
     }
 
@@ -60,7 +60,7 @@ public class OpenApiConfig {
     public GroupedOpenApi personnelApi() {
         return GroupedOpenApi.builder()
                 .group("2. Personnel")
-                .pathsToMatch("/personnel/**", "/v1/personnel/**", "/salary-levels/**", "/v1/salary-levels/**", "/customers/**", "/v1/customers/**")
+                .pathsToMatch("/employees/**", "/salary-levels/**", "/customers/**")
                 .build();
     }
 
@@ -68,7 +68,7 @@ public class OpenApiConfig {
     public GroupedOpenApi attendanceApi() {
         return GroupedOpenApi.builder()
                 .group("4. Attendance")
-                .pathsToMatch("/attendance/**", "/v1/attendance/**")
+                .pathsToMatch("/attendance/**", "/attendance-history/**")
                 .build();
     }
 
@@ -76,7 +76,7 @@ public class OpenApiConfig {
     public GroupedOpenApi schedulingApi() {
         return GroupedOpenApi.builder()
                 .group("3. Scheduling")
-                .pathsToMatch("/v1/shifts/**", "/v1/shift-templates/**", "/v1/packages/**")
+                .pathsToMatch("/shifts/**", "/packages/**", "/scheduling/**", "/shift-swap/**")
                 .build();
     }
 }

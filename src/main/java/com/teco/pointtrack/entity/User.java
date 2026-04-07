@@ -70,6 +70,10 @@ public class User extends BaseEntity {
     @Builder.Default
     boolean isFirstLogin = true;
 
+    /** BR-24: ghi nhận thời gian đổi MK gần nhất để invalidate token cũ */
+    @Column(name = "password_changed_at")
+    LocalDateTime passwordChangedAt;
+
     /** FR-02: ghi nhận thời gian đăng nhập cuối */
     @Column(name = "last_login_at")
     LocalDateTime lastLoginAt;

@@ -67,7 +67,8 @@ Standard layered architecture: `controller → service → repository → entity
 
 - **ShiftService** — core shift lifecycle: create, assign, conflict check, status transitions; includes copy-week feature
 - **ConflictCheckerService** — detects shift time/buffer overlaps before assignment
-- **AttendanceService** — check-in/out with GPS validation, geofence enforcement, explanation requests
+- **AttendanceService** — check-in/out with GPS fencing (BR-14), mandatory photo (BR-15), late/early logic (BR-16), audit log on admin edit (BR-19); also manages WorkSchedule creation
+- **ShiftTemplateService** — CRUD for reusable shift time templates
 - **ServicePackageService** — manages recurring service packages and auto-generates Shifts from recurrence patterns
 - **AuthService** — login, logout, token refresh, first-time password change, OTP-based password reset
 - **PasswordService** — OTP generation/validation for password reset (via SmsService)
@@ -93,13 +94,13 @@ Standard layered architecture: `controller → service → repository → entity
 
 - **Shift** — fixed-duration work assignment for an employee at a customer location; status lifecycle: `DRAFT → PUBLISHED → IN_PROGRESS → COMPLETED/CANCELLED`
 - **ShiftTemplate** — reusable shift definition (start/end time, OT multiplier); referenced by both Shifts and ServicePackages
-- **WorkSchedule** — daily work assignment linking User + ShiftTemplate + Customer with a OneToOne to AttendanceRecord
+- **WorkSchedule** — daily work assignment. Supports two modes: (1) linked via `ShiftTemplate` + `Customer` (legacy/shift-driven), and (2) direct fields `startTime`, `endTime`, `address`, `latitude`, `longitude` (manual/frontend-driven). `mapToResponse` falls back from new fields → legacy fields. Status: `SCHEDULED → CONFIRMED` (on check-in). Soft-delete via `deletedAt`.
 - **ServicePackage** — recurring service with recurrence pattern (days/times stored as JSON); generates Shifts automatically
 - **AttendanceRecord** — check-in/out with GPS coordinates; validated against customer location (geofence radius: 100m default); tracks late/early minutes
 - **AttendancePhoto** — photos captured at check-in/out with GPS metadata (type: CHECK_IN / CHECK_OUT)
 - **AttendanceAuditLog** — immutable audit trail written when Admin edits an attendance record
 - **ExplanationRequest** — submitted when check-in is late, GPS mismatches, or early checkout; status: `PENDING → APPROVED/REJECTED`
-- **SystemSetting** — key-value config table (e.g., `GRACE_PERIOD_MINUTES`, penalty rules); managed via `SchedulingSettingsController`
+- **SystemSetting** — key-value config table; managed via `SchedulingSettingsController`. Attendance keys: `GPS_RADIUS_METERS` (default 50m), `GRACE_PERIOD_MINUTES` (default 5), `LATE_CHECKOUT_THRESHOLD_MINUTES` (default 30), `MIN_WORK_MINUTES` (default 1). Other keys: penalty rules, travel buffer.
 - **SalaryLevel / SalaryLevelHistory** — tiered salary with change history when Admin updates employee level
 
 ### Entity Relationships Summary
@@ -129,9 +130,10 @@ ServicePackage ──── ShiftTemplate, Customer, User
 
 ## Testing
 
-- Framework: JUnit 5 + Spring Boot Test; uses H2 in-memory DB (no MySQL required for tests)
-- Tests in `src/test/java/com/teco/pointtrack/`
-- Key test classes: `ConflictCheckerServiceTest`, `EmployeeServiceTest`, `CustomerServiceTest`, `GeocodingServiceTest`, `PasswordServiceTest`, `EmployeeImportServiceTest`, `CustomerImportServiceTest`
+- Framework: JUnit 5 + Spring Boot Test; H2 in-memory DB (no MySQL required for tests)
+- Two test styles in use:
+  - **Spring Boot integration tests** (H2): `ConflictCheckerServiceTest`, `EmployeeServiceTest`, `CustomerServiceTest`, `GeocodingServiceTest`, `PasswordServiceTest`, `EmployeeImportServiceTest`, `CustomerImportServiceTest`
+  - **Mockito-only unit tests** (`@ExtendWith(MockitoExtension.class)` + `@InjectMocks`): `AttendanceServiceTest` — use this style for services with many external dependencies
 - Mock external APIs (Google Maps, Turnstile) in tests; real DB connections use H2
 
 ## API Documentation

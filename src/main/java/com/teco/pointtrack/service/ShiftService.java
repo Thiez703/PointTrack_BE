@@ -33,7 +33,6 @@ import java.util.stream.Collectors;
 public class ShiftService {
 
     private final ShiftRepository         shiftRepository;
-    private final ShiftTemplateRepository templateRepository;
     private final UserRepository          userRepository;
     private final CustomerRepository      customerRepository;
     private final ConflictCheckerService  conflictChecker;
@@ -57,9 +56,6 @@ public class ShiftService {
     @Transactional(readOnly = true)
     public List<ShiftResponse> getMyTodayShifts(Long employeeId) {
         LocalDate today = LocalDate.now();
-        // Lấy khoảng ±1 ngày để xử lý:
-        // 1. Ca qua đêm (shiftDate hôm qua nhưng check-out hôm nay)
-        // 2. Chênh lệch múi giờ server (UTC) vs VN (GMT+7)
         return shiftRepository.findRelevantShifts(employeeId, today.minusDays(1), today.plusDays(1))
                 .stream()
                 .map(this::toResponse)
@@ -94,14 +90,12 @@ public class ShiftService {
                 .map(this::toResponse)
                 .collect(Collectors.toList());
 
-        // Nếu FE truyền employeeId -> trả về {content: []} đúng ý FE
         if (employeeId != null) {
             Map<String, Object> result = new HashMap<>();
             result.put("content", responseList);
             return result;
         }
 
-        // Nếu không -> giữ logic cũ (group by employeeId cho Admin view)
         return responseList.stream()
                 .collect(Collectors.groupingBy(s -> String.valueOf(s.getEmployeeId())));
     }
@@ -114,30 +108,18 @@ public class ShiftService {
     public ShiftResponse create(ShiftRequest req) {
         Customer customer = findCustomer(req.getCustomerId());
 
-        // BR-10: validate overnight rule
         validateOvernightRule(req.getShiftType(), req.getStartTime(), req.getEndTime());
-
-        // Tính duration
         int duration = calcDuration(req.getShiftType(), req.getStartTime(), req.getEndTime());
 
-        // Template (tuỳ chọn)
-        ShiftTemplate template = null;
-        if (req.getTemplateId() != null) {
-            template = templateRepository.findByIdAndDeletedAtIsNull(req.getTemplateId())
-                    .orElseThrow(() -> new NotFoundException("Ca mẫu không tồn tại (id={})", req.getTemplateId()));
-        }
-
-        // Ca trống (PUBLISHED) khi không có employeeId
         if (req.getEmployeeId() == null) {
             Shift openSlot = Shift.builder()
                     .customer(customer)
-                    .template(template)
                     .shiftDate(req.getShiftDate())
                     .startTime(req.getStartTime())
                     .endTime(req.getEndTime())
                     .durationMinutes(duration)
                     .shiftType(req.getShiftType())
-                    .otMultiplier(template != null ? template.getOtMultiplier() : defaultOtMultiplier(req.getShiftType()))
+                    .otMultiplier(defaultOtMultiplier(req.getShiftType()))
                     .notes(req.getNotes())
                     .status(ShiftStatus.PUBLISHED)
                     .build();
@@ -148,8 +130,6 @@ public class ShiftService {
 
         User employee = findEmployee(req.getEmployeeId());
 
-        // BR-13: Conflict check (OT_EMERGENCY bỏ qua BUFFER nhưng vẫn block OVERLAP)
-        // BR-09: truyền customer để tính buffer theo khoảng cách thực tế
         ConflictCheckResponse conflict = conflictChecker.check(
                 req.getEmployeeId(), req.getShiftDate(),
                 req.getStartTime(), req.getEndTime(),
@@ -160,20 +140,17 @@ public class ShiftService {
         Shift shift = Shift.builder()
                 .employee(employee)
                 .customer(customer)
-                .template(template)
                 .shiftDate(req.getShiftDate())
                 .startTime(req.getStartTime())
                 .endTime(req.getEndTime())
                 .durationMinutes(duration)
                 .shiftType(req.getShiftType())
-                .otMultiplier(template != null ? template.getOtMultiplier() : defaultOtMultiplier(req.getShiftType()))
+                .otMultiplier(defaultOtMultiplier(req.getShiftType()))
                 .notes(req.getNotes())
                 .status(ShiftStatus.ASSIGNED)
                 .build();
 
         Shift saved = shiftRepository.save(shift);
-
-        // Notification (BR: HIGH priority nếu OT_EMERGENCY)
         logNotification(saved);
 
         log.info("Created shift id={} employee={} date={} type={}", saved.getId(),
@@ -185,41 +162,23 @@ public class ShiftService {
     // POST /api/v1/shifts/assign — Gán ca trực (Drag & Drop)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Gán một nhân viên vào ca trực cụ thể.
-     * Toàn bộ luồng chạy trong một transaction để đảm bảo consistency.
-     *
-     * @return cặp (data, warningMessage). warningMessage != null nghĩa là DISTANCE_WARNING.
-     */
     @Transactional
     public AssignShiftResult assign(AssignShiftRequest req) {
-
-        // ── Bước 1a: Resolve thời gian (template hoặc manual) ────────────────
-        ShiftTemplate template = null;
-        LocalTime startTime    = req.getStartTime();
-        LocalTime endTime      = req.getEndTime();
-
-        if (req.getTemplateId() != null) {
-            template  = templateRepository.findByIdAndDeletedAtIsNull(req.getTemplateId())
-                    .orElseThrow(() -> new NotFoundException("Ca mẫu không tồn tại (id={})", req.getTemplateId()));
-            startTime = template.getDefaultStart();
-            endTime   = template.getDefaultEnd();
-        }
+        LocalTime startTime = req.getStartTime();
+        LocalTime endTime   = req.getEndTime();
 
         if (startTime == null || endTime == null) {
             throw new ShiftAssignException("INVALID_TIME_RANGE",
-                    "Thời gian bắt đầu và kết thúc không được để trống khi không dùng template",
+                    "Thời gian bắt đầu và kết thúc không được để trống",
                     HttpStatus.BAD_REQUEST);
         }
 
-        // ── Bước 1b: Validate khoảng thời gian ──────────────────────────────
         if (endTime.equals(startTime)) {
             throw new ShiftAssignException("INVALID_TIME_RANGE",
                     "Giờ bắt đầu và kết thúc không được giống nhau",
                     HttpStatus.BAD_REQUEST);
         }
 
-        // ── Bước 2: Kiểm tra nhân viên ──────────────────────────────────────
         User employee = userRepository.findByIdAndDeletedAtIsNull(req.getEmployeeId())
                 .orElseThrow(() -> new ShiftAssignException("EMPLOYEE_NOT_FOUND",
                         "Không tìm thấy nhân viên (id=" + req.getEmployeeId() + ")",
@@ -231,7 +190,6 @@ public class ShiftService {
                     HttpStatus.FORBIDDEN);
         }
 
-        // ── Bước 3: Kiểm tra khách hàng ─────────────────────────────────────
         Customer customer = customerRepository.findByIdAndDeletedAtIsNull(req.getCustomerId())
                 .orElseThrow(() -> new ShiftAssignException("CUSTOMER_NOT_FOUND",
                         "Không tìm thấy khách hàng (id=" + req.getCustomerId() + ")",
@@ -243,7 +201,6 @@ public class ShiftService {
                     HttpStatus.FORBIDDEN);
         }
 
-        // ── Bước 4: Kiểm tra trùng lịch (Conflict Check) ────────────────────
         ConflictCheckResponse conflict = conflictChecker.check(
                 req.getEmployeeId(), req.getShiftDate(),
                 startTime, endTime, req.getShiftType(), null, customer);
@@ -269,15 +226,13 @@ public class ShiftService {
                             .build());
         }
 
-        // Phát hiện BUFFER conflict → cảnh báo DISTANCE_WARNING sau khi lưu
         boolean distanceWarning = conflict.isHasConflict() && "BUFFER".equals(conflict.getConflictType());
         String  warningMessage  = distanceWarning ? conflict.getDetail() : null;
 
-        // ── Bước 5: Kiểm tra tổng giờ làm trong ngày (EXCEED_WORKING_HOURS) ─
         int durationMinutes  = calcDuration(req.getShiftType(), startTime, endTime);
         int existingMinutes  = shiftRepository.sumDurationMinutesByEmployeeAndDate(
                 req.getEmployeeId(), req.getShiftDate());
-        final int MAX_MINUTES = 12 * 60; // 12 tiếng
+        final int MAX_MINUTES = 12 * 60;
 
         if (existingMinutes + durationMinutes > MAX_MINUTES) {
             throw new ShiftAssignException("EXCEED_WORKING_HOURS",
@@ -286,25 +241,19 @@ public class ShiftService {
                     HttpStatus.BAD_REQUEST);
         }
 
-        // ── Bước 6: Lưu ca trực ─────────────────────────────────────────────
         Shift shift = Shift.builder()
                 .employee(employee)
                 .customer(customer)
-                .template(template)
                 .shiftDate(req.getShiftDate())
                 .startTime(startTime)
                 .endTime(endTime)
                 .durationMinutes(durationMinutes)
                 .shiftType(req.getShiftType())
-                .otMultiplier(template != null ? template.getOtMultiplier() : defaultOtMultiplier(req.getShiftType()))
+                .otMultiplier(defaultOtMultiplier(req.getShiftType()))
                 .status(ShiftStatus.ASSIGNED)
                 .build();
 
         Shift saved = shiftRepository.save(shift);
-
-        log.info("[ASSIGN] Gán nhân viên '{}' vào ca id={} ngày={} KH='{}' lúc {}",
-                employee.getFullName(), saved.getId(), req.getShiftDate(),
-                customer.getName(), java.time.LocalDateTime.now());
         logNotification(saved);
 
         AssignShiftResponse data = AssignShiftResponse.builder()
@@ -317,26 +266,12 @@ public class ShiftService {
         return new AssignShiftResult(data, warningMessage);
     }
 
-    /** Kết quả trả về từ assign(): data + cảnh báo tùy chọn DISTANCE_WARNING */
     public record AssignShiftResult(AssignShiftResponse data, String distanceWarning) {
         public boolean hasWarning() { return distanceWarning != null; }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // PUT /api/v1/shifts/{shiftId}/assign — Admin gán NV vào ca đã tồn tại
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Gán nhân viên vào một ca đã tồn tại (chuyển PUBLISHED/DRAFT → ASSIGNED).
-     * Toàn bộ chạy trong một transaction.
-     *
-     * @param shiftId    ID ca cần gán
-     * @param employeeId ID nhân viên được gán
-     */
     @Transactional
     public AssignToShiftResponse assignEmployee(Long shiftId, Long employeeId) {
-
-        // ── Bước 1: Kiểm tra ca tồn tại ─────────────────────────────────────
         Shift shift = shiftRepository.findById(shiftId)
                 .orElseThrow(() -> new ShiftAssignException("SHIFT_NOT_FOUND",
                         "Không tìm thấy ca làm việc (id=" + shiftId + ")",
@@ -353,7 +288,6 @@ public class ShiftService {
                     HttpStatus.BAD_REQUEST);
         }
 
-        // ── Bước 2: Kiểm tra nhân viên ──────────────────────────────────────
         User employee = userRepository.findByIdAndDeletedAtIsNull(employeeId)
                 .orElseThrow(() -> new ShiftAssignException("SHIFT_NOT_FOUND",
                         "Không tìm thấy nhân viên (id=" + employeeId + ")",
@@ -365,7 +299,6 @@ public class ShiftService {
                     HttpStatus.FORBIDDEN);
         }
 
-        // ── Bước 3: Kiểm tra xung đột lịch (loại trừ chính ca đang xử lý) ──
         ConflictCheckResponse conflict = conflictChecker.check(
                 employeeId, shift.getShiftDate(),
                 shift.getStartTime(), shift.getEndTime(),
@@ -392,7 +325,6 @@ public class ShiftService {
                             .build());
         }
 
-        // ── Bước 4: Kiểm tra giới hạn giờ làm trong ngày (MAX_HOURS_EXCEEDED) ─
         int existingMinutes = shiftRepository.sumDurationMinutesByEmployeeAndDate(
                 employeeId, shift.getShiftDate());
         final int MAX_MINUTES = 12 * 60;
@@ -405,13 +337,9 @@ public class ShiftService {
                     HttpStatus.BAD_REQUEST);
         }
 
-        // ── Bước 5: Cập nhật ca ──────────────────────────────────────────────
         shift.setEmployee(employee);
         shift.setStatus(ShiftStatus.ASSIGNED);
         shiftRepository.save(shift);
-
-        log.info("[ASSIGN_EMPLOYEE] Ca id={} gán cho nhân viên '{}' (id={}) lúc {}",
-                shiftId, employee.getFullName(), employeeId, java.time.LocalDateTime.now());
 
         return AssignToShiftResponse.builder()
                 .id(shift.getId())
@@ -422,10 +350,6 @@ public class ShiftService {
                 .build();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // PUT /api/v1/shifts/{id}
-    // ─────────────────────────────────────────────────────────────────────────
-
     @Transactional
     public ShiftResponse update(Long id, ShiftRequest req) {
         Shift shift = findActiveShift(id);
@@ -435,17 +359,9 @@ public class ShiftService {
         }
 
         Customer customer = findCustomer(req.getCustomerId());
-
         validateOvernightRule(req.getShiftType(), req.getStartTime(), req.getEndTime());
 
-        ShiftTemplate template = null;
-        if (req.getTemplateId() != null) {
-            template = templateRepository.findByIdAndDeletedAtIsNull(req.getTemplateId())
-                    .orElseThrow(() -> new NotFoundException("Ca mẫu không tồn tại (id={})", req.getTemplateId()));
-        }
-
         if (req.getEmployeeId() == null) {
-            // Chuyển về ca trống
             shift.setEmployee(null);
             shift.setStatus(ShiftStatus.PUBLISHED);
         } else {
@@ -456,50 +372,89 @@ public class ShiftService {
                     req.getShiftType(), id, customer);
             handleConflict(conflict, req.getShiftType());
             shift.setEmployee(employee);
-            // Giữ trạng thái hiện tại nếu đã CONFIRMED, ngược lại set ASSIGNED
             if (shift.getStatus() != ShiftStatus.CONFIRMED) {
                 shift.setStatus(ShiftStatus.ASSIGNED);
             }
         }
 
         shift.setCustomer(customer);
-        shift.setTemplate(template);
         shift.setShiftDate(req.getShiftDate());
         shift.setStartTime(req.getStartTime());
         shift.setEndTime(req.getEndTime());
         shift.setDurationMinutes(calcDuration(req.getShiftType(), req.getStartTime(), req.getEndTime()));
         shift.setShiftType(req.getShiftType());
-        shift.setOtMultiplier(template != null ? template.getOtMultiplier() : defaultOtMultiplier(req.getShiftType()));
+        shift.setOtMultiplier(defaultOtMultiplier(req.getShiftType()));
         shift.setNotes(req.getNotes());
 
         shiftRepository.save(shift);
-        log.info("Updated shift id={}", id);
         return toResponse(shift);
     }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // DELETE /api/v1/shifts/{id} → status = CANCELLED
-    // ─────────────────────────────────────────────────────────────────────────
 
     @Transactional
     public void cancel(Long id) {
         Shift shift = findActiveShift(id);
-
         if (shift.getStatus() == ShiftStatus.COMPLETED || shift.getStatus() == ShiftStatus.IN_PROGRESS) {
             throw new BadRequestException("Không thể huỷ ca đang thực hiện hoặc đã hoàn thành");
         }
-        if (shift.getStatus() == ShiftStatus.CANCELLED) {
-            throw new BadRequestException("Ca này đã được huỷ trước đó");
-        }
-
         shift.setStatus(ShiftStatus.CANCELLED);
         shiftRepository.save(shift);
-        log.info("Cancelled shift id={}", id);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // GET /api/v1/shifts/conflict-check — tiền kiểm tra trước khi lưu
-    // ─────────────────────────────────────────────────────────────────────────
+    @Transactional
+    public void unassignEmployee(Long id) {
+        Shift shift = findActiveShift(id);
+        if (shift.getStatus() == ShiftStatus.COMPLETED || shift.getStatus() == ShiftStatus.IN_PROGRESS) {
+            throw new BadRequestException("Không thể gỡ nhân viên khỏi ca đang thực hiện hoặc đã hoàn thành");
+        }
+        if (shift.getEmployee() == null) {
+            throw new BadRequestException("Ca này chưa được gán nhân viên");
+        }
+        shift.setEmployee(null);
+        shift.setStatus(ShiftStatus.PUBLISHED);
+        shiftRepository.save(shift);
+        log.info("Unassigned employee from shift id={}", id);
+    }
+
+    @Transactional
+    public void hardDelete(Long id) {
+        Shift shift = shiftRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Ca không tìm thấy (id={})", id));
+
+        if (shift.getStatus() == ShiftStatus.COMPLETED || shift.getStatus() == ShiftStatus.IN_PROGRESS) {
+            throw new BadRequestException("Không thể xóa ca đang thực hiện hoặc đã hoàn thành");
+        }
+
+        // Kiểm tra xem có yêu cầu đổi ca nào đang PENDING không
+        // Nếu có, chúng ta nên hủy chúng hoặc báo lỗi. Ở đây báo lỗi cho an toàn.
+        // existsPendingForRequesterShift ...
+        
+        shiftRepository.delete(shift);
+        log.info("Hard deleted shift id={}", id);
+    }
+
+    @Transactional
+    public void autoProcessShifts() {
+        LocalDate today = LocalDate.now();
+        LocalTime now   = LocalTime.now();
+
+        // 1. Xử lý ca MISSED (Quá 1 tiếng chưa check-in)
+        LocalTime missedThreshold = now.minusHours(1);
+        List<Shift> missedShifts = shiftRepository.findPendingMissedShifts(today, missedThreshold);
+        if (!missedShifts.isEmpty()) {
+            missedShifts.forEach(s -> s.setStatus(ShiftStatus.MISSED));
+            shiftRepository.saveAll(missedShifts);
+            log.info("Auto-marked {} shifts as MISSED", missedShifts.size());
+        }
+
+        // 2. Xử lý ca MISSING_OUT (Quá 2 tiếng chưa check-out)
+        LocalTime missingOutThreshold = now.minusHours(2);
+        List<Shift> missingOutShifts = shiftRepository.findPendingMissingOutShifts(today, today.minusDays(1), missingOutThreshold);
+        if (!missingOutShifts.isEmpty()) {
+            missingOutShifts.forEach(s -> s.setStatus(ShiftStatus.MISSING_OUT));
+            shiftRepository.saveAll(missingOutShifts);
+            log.info("Auto-marked {} shifts as MISSING_OUT", missingOutShifts.size());
+        }
+    }
 
     @Transactional(readOnly = true)
     public ConflictCheckResponse preCheck(Long employeeId, LocalDate shiftDate,
@@ -508,10 +463,6 @@ public class ShiftService {
         validateOvernightRule(shiftType, startTime, endTime);
         return conflictChecker.check(employeeId, shiftDate, startTime, endTime, shiftType, excludeShiftId);
     }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // POST /api/v1/shifts/copy-week
-    // ─────────────────────────────────────────────────────────────────────────
 
     @Transactional
     public CopyWeekResponse copyWeek(CopyWeekRequest req) {
@@ -529,7 +480,6 @@ public class ShiftService {
         List<ConflictCheckResponse> conflicts = new ArrayList<>();
 
         for (Shift src : sourceShifts) {
-            // Tính offset (0–6) trong tuần nguồn
             long offset = src.getShiftDate().toEpochDay() - srcStart.toEpochDay();
             LocalDate newDate = tgtStart.plusDays(offset);
 
@@ -539,13 +489,12 @@ public class ShiftService {
                     src.getShiftType(), null, src.getCustomer());
 
             if (conflict.isHasConflict()) {
-                conflict = ConflictCheckResponse.builder()
+                conflicts.add(ConflictCheckResponse.builder()
                         .hasConflict(true)
                         .conflictType(conflict.getConflictType())
                         .detail("[" + newDate + " " + src.getEmployee().getFullName() + "] " + conflict.getDetail())
                         .minutesShort(conflict.getMinutesShort())
-                        .build();
-                conflicts.add(conflict);
+                        .build());
                 skipped++;
                 continue;
             }
@@ -553,8 +502,6 @@ public class ShiftService {
             Shift copy = Shift.builder()
                     .employee(src.getEmployee())
                     .customer(src.getCustomer())
-                    .template(src.getTemplate())
-                    .servicePackage(null)          // copy tuần không mang theo gói
                     .shiftDate(newDate)
                     .startTime(src.getStartTime())
                     .endTime(src.getEndTime())
@@ -568,7 +515,6 @@ public class ShiftService {
             copied++;
         }
 
-        log.info("Copy week {} → {}: copied={} skipped={}", req.getSourceWeek(), req.getTargetWeek(), copied, skipped);
         return CopyWeekResponse.builder()
                 .copied(copied)
                 .skipped(skipped)
@@ -576,18 +522,11 @@ public class ShiftService {
                 .build();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // GET /api/v1/shifts/available-employees
-    // ─────────────────────────────────────────────────────────────────────────
-
     @Transactional(readOnly = true)
     public List<AvailableEmployeeResponse> findAvailableEmployees(
             LocalDate shiftDate, LocalTime startTime, LocalTime endTime, ShiftType shiftType) {
 
-        // Lấy tất cả nhân viên đang hoạt động
-        List<User> allEmployees = userRepository.findAllByStatusAndDeletedAtIsNull(
-                com.teco.pointtrack.entity.enums.UserStatus.ACTIVE);
-
+        List<User> allEmployees = userRepository.findAllByStatusAndDeletedAtIsNull(UserStatus.ACTIVE);
         List<AvailableEmployeeResponse> result = new ArrayList<>();
 
         for (User emp : allEmployees) {
@@ -595,7 +534,6 @@ public class ShiftService {
                     emp.getId(), shiftDate, startTime, endTime, shiftType, null);
 
             if (!conflict.isHasConflict() || "BUFFER".equals(conflict.getConflictType())) {
-                // Tìm ca tiếp theo của nhân viên trong ngày để biết nextShiftEndTime
                 List<Shift> dayShifts = shiftRepository.findActiveShiftsNear(
                         emp.getId(), shiftDate, shiftDate, null);
 
@@ -616,13 +554,8 @@ public class ShiftService {
         return result;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // POST /api/v1/shifts/recurring — tạo ca lặp lại theo tuần
-    // ─────────────────────────────────────────────────────────────────────────
-
     @Transactional
     public RecurringShiftResponse createRecurring(RecurringShiftRequest req) {
-        // Giới hạn 180 ngày để tránh tạo quá nhiều ca
         if (req.getStartDate().plusDays(180).isBefore(req.getEndDate())) {
             throw new BadRequestException("Khoảng lặp tối đa 180 ngày");
         }
@@ -632,15 +565,7 @@ public class ShiftService {
 
         validateOvernightRule(req.getShiftType(), req.getStartTime(), req.getEndTime());
         int duration = calcDuration(req.getShiftType(), req.getStartTime(), req.getEndTime());
-
         Customer customer = findCustomer(req.getCustomerId());
-
-        ShiftTemplate template = null;
-        if (req.getTemplateId() != null) {
-            template = templateRepository.findByIdAndDeletedAtIsNull(req.getTemplateId())
-                    .orElseThrow(() -> new NotFoundException("Ca mẫu không tồn tại (id={})", req.getTemplateId()));
-        }
-
         User employee = req.getEmployeeId() != null ? findEmployee(req.getEmployeeId()) : null;
 
         List<Long> createdIds = new ArrayList<>();
@@ -652,7 +577,6 @@ public class ShiftService {
             if (req.getDaysOfWeek().contains(current.getDayOfWeek())) {
                 LocalDate shiftDate = current;
 
-                // Conflict check chỉ khi có nhân viên
                 if (employee != null) {
                     ConflictCheckResponse conflict = conflictChecker.check(
                             employee.getId(), shiftDate,
@@ -675,13 +599,12 @@ public class ShiftService {
                 Shift shift = Shift.builder()
                         .employee(employee)
                         .customer(customer)
-                        .template(template)
                         .shiftDate(shiftDate)
                         .startTime(req.getStartTime())
                         .endTime(req.getEndTime())
                         .durationMinutes(duration)
                         .shiftType(req.getShiftType())
-                        .otMultiplier(template != null ? template.getOtMultiplier() : defaultOtMultiplier(req.getShiftType()))
+                        .otMultiplier(defaultOtMultiplier(req.getShiftType()))
                         .notes(req.getNotes())
                         .status(employee != null ? ShiftStatus.ASSIGNED : ShiftStatus.PUBLISHED)
                         .build();
@@ -692,9 +615,6 @@ public class ShiftService {
             current = current.plusDays(1);
         }
 
-        log.info("Recurring shift: created={} skipped={} employee={}", createdIds.size(), skipped,
-                employee != null ? employee.getFullName() : "OPEN");
-
         return RecurringShiftResponse.builder()
                 .created(createdIds.size())
                 .skipped(skipped)
@@ -703,20 +623,12 @@ public class ShiftService {
                 .build();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // GET /api/v1/shifts/open — danh sách ca trống cho nhân viên đăng ký
-    // ─────────────────────────────────────────────────────────────────────────
-
     @Transactional(readOnly = true)
     public List<ShiftResponse> getOpenShifts() {
         return shiftRepository.findOpenShifts(LocalDate.now()).stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
     }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // POST /api/v1/shifts/{id}/claim — nhân viên tự nhận ca trống
-    // ─────────────────────────────────────────────────────────────────────────
 
     @Transactional
     public ShiftResponse claimShift(Long shiftId, Long employeeId) {
@@ -726,13 +638,7 @@ public class ShiftService {
         if (shift.getStatus() != ShiftStatus.PUBLISHED) {
             throw new BadRequestException("Ca này không ở trạng thái PUBLISHED, không thể đăng ký");
         }
-        if (shift.getEmployee() != null) {
-            throw new BadRequestException("Ca này đã có người nhận");
-        }
-
         User employee = findEmployee(employeeId);
-
-        // Kiểm tra conflict trước khi nhận
         ConflictCheckResponse conflict = conflictChecker.check(
                 employeeId, shift.getShiftDate(),
                 shift.getStartTime(), shift.getEndTime(),
@@ -745,41 +651,22 @@ public class ShiftService {
         shift.setEmployee(employee);
         shift.setStatus(ShiftStatus.ASSIGNED);
         shiftRepository.save(shift);
-
-        log.info("Claim shift: id={} employee={}", shiftId, employee.getFullName());
         return toResponse(shift);
     }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // POST /api/v1/shifts/{id}/confirm — nhân viên xác nhận sẽ đi làm
-    // ─────────────────────────────────────────────────────────────────────────
 
     @Transactional
     public ShiftResponse confirmShift(Long shiftId, Long employeeId) {
         Shift shift = findActiveShift(shiftId);
-
         if (shift.getEmployee() == null || !shift.getEmployee().getId().equals(employeeId)) {
             throw new BadRequestException("Bạn không phải nhân viên được gán cho ca này");
         }
-
-        boolean isAssignedStatus = shift.getStatus() == ShiftStatus.ASSIGNED
-                || shift.getStatus() == ShiftStatus.SCHEDULED;
-
-        if (!isAssignedStatus) {
-            throw new BadRequestException(
-                    "Chỉ có thể xác nhận ca ở trạng thái ASSIGNED. Trạng thái hiện tại: " + shift.getStatus());
+        if (shift.getStatus() != ShiftStatus.ASSIGNED && shift.getStatus() != ShiftStatus.SCHEDULED) {
+            throw new BadRequestException("Chỉ có thể xác nhận ca ở trạng thái ASSIGNED.");
         }
-
         shift.setStatus(ShiftStatus.CONFIRMED);
         shiftRepository.save(shift);
-
-        log.info("Confirm shift: id={} employee={}", shiftId, employeeId);
         return toResponse(shift);
     }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Private helpers
-    // ─────────────────────────────────────────────────────────────────────────
 
     private void handleConflict(ConflictCheckResponse conflict, ShiftType shiftType) {
         if (!conflict.isHasConflict()) return;
@@ -789,13 +676,10 @@ public class ShiftService {
         if (ShiftType.OT_EMERGENCY != shiftType) {
             throw new ConflictException("SHIFT_BUFFER: " + conflict.getDetail());
         }
-        log.warn("[OT_EMERGENCY] Bỏ qua buffer conflict: {}", conflict.getDetail());
     }
 
     private boolean isCheckInAllowed(ShiftStatus status) {
-        return status == ShiftStatus.ASSIGNED
-                || status == ShiftStatus.SCHEDULED
-                || status == ShiftStatus.CONFIRMED;
+        return status == ShiftStatus.ASSIGNED || status == ShiftStatus.SCHEDULED || status == ShiftStatus.CONFIRMED;
     }
 
     private Shift findActiveShift(Long id) {
@@ -806,11 +690,8 @@ public class ShiftService {
     private User findEmployee(Long id) {
         User employee = userRepository.findByIdAndDeletedAtIsNull(id)
                 .orElseThrow(() -> new NotFoundException("Nhân viên không tồn tại (id={})", id));
-        if (employee.getStatus() == UserStatus.ON_LEAVE) {
-            throw new BadRequestException("Nhân viên đang nghỉ phép (ON_LEAVE). Không thể gán ca mới.");
-        }
-        if (employee.getStatus() == UserStatus.INACTIVE) {
-            throw new BadRequestException("Nhân viên đã bị vô hiệu hóa. Không thể gán ca mới.");
+        if (employee.getStatus() == UserStatus.ON_LEAVE || employee.getStatus() == UserStatus.INACTIVE) {
+            throw new BadRequestException("Nhân viên không ở trạng thái sẵn sàng để gán ca.");
         }
         return employee;
     }
@@ -822,13 +703,12 @@ public class ShiftService {
 
     private void validateOvernightRule(ShiftType type, LocalTime start, LocalTime end) {
         if (end.equals(start)) {
-            throw new BadRequestException("SHIFT_ZERO_DURATION: Giờ bắt đầu và kết thúc không được giống nhau");
+            throw new BadRequestException("Giờ bắt đầu và kết thúc không được giống nhau");
         }
     }
 
     private int calcDuration(ShiftType type, LocalTime start, LocalTime end) {
         if (end.isBefore(start)) {
-            // Ca qua đêm
             int untilMidnight = (24 * 60) - (start.getHour() * 60 + start.getMinute());
             int afterMidnight = end.getHour() * 60 + end.getMinute();
             return untilMidnight + afterMidnight;
@@ -845,25 +725,16 @@ public class ShiftService {
     }
 
     private void logNotification(Shift shift) {
-        String priority = shift.getShiftType() == ShiftType.OT_EMERGENCY ? "HIGH" : "NORMAL";
-        log.info("[NOTIFICATION][{}] Ca mới id={} nhân viên={} ngày={}",
-                priority, shift.getId(), shift.getEmployee().getFullName(), shift.getShiftDate());
+        log.info("[NOTIFICATION] Ca mới id={} nhân viên={} ngày={}",
+                shift.getId(), shift.getEmployee().getFullName(), shift.getShiftDate());
     }
 
-    /** Parse "2026-W12" → [year=2026, week=12] */
     private int[] parseIsoWeek(String isoWeek) {
         String[] parts = isoWeek.split("-W");
-        if (parts.length != 2) {
-            throw new BadRequestException("Định dạng tuần không hợp lệ. Dùng 'yyyy-Www' (VD: 2026-W12)");
-        }
-        try {
-            return new int[]{Integer.parseInt(parts[0]), Integer.parseInt(parts[1])};
-        } catch (NumberFormatException e) {
-            throw new BadRequestException("Định dạng tuần không hợp lệ. Dùng 'yyyy-Www' (VD: 2026-W12)");
-        }
+        if (parts.length != 2) throw new BadRequestException("Định dạng tuần không hợp lệ.");
+        return new int[]{Integer.parseInt(parts[0]), Integer.parseInt(parts[1])};
     }
 
-    /** Thứ Hai đầu tiên của tuần ISO */
     private LocalDate isoWeekStart(int year, int week) {
         return LocalDate.now()
                 .withYear(year)
@@ -881,9 +752,7 @@ public class ShiftService {
                 .customerName(c.getName())
                 .customerLatitude(c.getLatitude())
                 .customerLongitude(c.getLongitude())
-                .customerAddress(buildAddress(c))
-                .templateId(s.getTemplate() != null ? s.getTemplate().getId() : null)
-                .templateName(s.getTemplate() != null ? s.getTemplate().getName() : null)
+                .customerAddress(c.getAddress())
                 .packageId(s.getServicePackage() != null ? s.getServicePackage().getId() : null)
                 .shiftDate(s.getShiftDate())
                 .startTime(s.getStartTime())
@@ -908,136 +777,77 @@ public class ShiftService {
                 .build();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Check-in / Check-out (Feature 1: GPS Geofence)
-    // ─────────────────────────────────────────────────────────────────────────
-
     @Transactional
     public CheckInResponse checkIn(Long shiftId, CheckInRequest request) {
         Shift shift = findActiveShift(shiftId);
-
-        // Chỉ cho phép check-in khi đã được gán hoặc xác nhận
-        if (!isCheckInAllowed(shift.getStatus())) {
-            throw new BadRequestException(
-                    "Không thể check-in: ca ở trạng thái " + shift.getStatus() +
-                    ". Ca phải ở ASSIGNED, SCHEDULED hoặc CONFIRMED.");
-        }
-        if (shift.getCheckInTime() != null) {
-            if (shift.getCheckOutTime() != null) {
-                throw new BadRequestException("Ca làm việc này đã hoàn thành (đã check-out).");
-            }
-            throw new BadRequestException("Ca này đã được check-in lúc " + shift.getCheckInTime());
-        }
-
-        double   distance       = computeDistance(shift.getCustomer(), request.getLatitude(), request.getLongitude());
-        boolean  hasCoords      = shift.getCustomer().getLatitude() != null;
-        boolean  withinGeofence = !hasCoords || distance <= geofenceRadiusMeters;
-
-        // Ngoài geofence → bắt buộc có ảnh
+        if (!isCheckInAllowed(shift.getStatus())) throw new BadRequestException("Không thể check-in.");
+        double distance = computeDistance(shift.getCustomer(), request.getLatitude(), request.getLongitude());
+        boolean withinGeofence = shift.getCustomer().getLatitude() == null || distance <= geofenceRadiusMeters;
         if (!withinGeofence && (request.getPhotoUrl() == null || request.getPhotoUrl().isBlank())) {
-            throw new BadRequestException(
-                    String.format("Check-in ngoài geofence (cách %.0fm, giới hạn %.0fm): bắt buộc gửi kèm ảnh hiện trường (photoUrl)",
-                            distance, geofenceRadiusMeters));
+            throw new BadRequestException("Ngoài geofence: bắt buộc gửi kèm ảnh.");
         }
-
         LocalDateTime now = LocalDateTime.now();
         shift.setCheckInTime(now);
         shift.setCheckInLat(request.getLatitude());
         shift.setCheckInLng(request.getLongitude());
-        shift.setCheckInDistanceMeters(hasCoords ? distance : null);
+        shift.setCheckInDistanceMeters(shift.getCustomer().getLatitude() != null ? distance : null);
         shift.setCheckInPhoto(request.getPhotoUrl());
         shift.setStatus(ShiftStatus.IN_PROGRESS);
         shiftRepository.save(shift);
-
-        log.info("Check-in: shift={} distance={}m withinGeofence={}", shiftId, Math.round(distance), withinGeofence);
-
-        String message = withinGeofence
-                ? "Check-in thành công"
-                : String.format("Check-in ghi nhận nhưng bạn đang cách vị trí %.0fm (giới hạn %.0fm). Ảnh hiện trường đã được ghi nhận.",
-                                distance, geofenceRadiusMeters);
-
         return CheckInResponse.builder()
                 .withinGeofence(withinGeofence)
-                .distanceMeters(hasCoords ? distance : 0)
-                .geofenceRadiusMeters(hasCoords ? geofenceRadiusMeters : -1)
+                .distanceMeters(distance)
+                .geofenceRadiusMeters(geofenceRadiusMeters)
                 .actionTime(now)
                 .shiftStatus(shift.getStatus())
-                .message(message)
+                .message(withinGeofence ? "Check-in thành công" : "Check-in ghi nhận ngoài geofence.")
                 .build();
     }
 
     @Transactional
     public CheckInResponse checkOut(Long shiftId, CheckInRequest request) {
         Shift shift = findActiveShift(shiftId);
-
-        if (shift.getStatus() != ShiftStatus.IN_PROGRESS) {
-            throw new BadRequestException("Ca chưa được check-in hoặc đã hoàn thành");
-        }
-
-        double  distance  = computeDistance(shift.getCustomer(), request.getLatitude(), request.getLongitude());
-        boolean hasCoords = shift.getCustomer().getLatitude() != null;
-
+        if (shift.getStatus() != ShiftStatus.IN_PROGRESS) throw new BadRequestException("Ca chưa check-in.");
+        double distance = computeDistance(shift.getCustomer(), request.getLatitude(), request.getLongitude());
         LocalDateTime now = LocalDateTime.now();
-
-        // Kiểm tra thời gian làm việc tối thiểu (ít nhất 1 phút)
-        if (now.isBefore(shift.getCheckInTime().plusMinutes(1))) {
-            throw new BadRequestException("Bạn chỉ có thể check-out sau ít nhất 1 phút kể từ khi check-in.");
-        }
-
-        // Nghiệp vụ mới: Nếu checkout sớm vẫn tính đủ số phút dự kiến của ca (durationMinutes)
+        /*
+        if (now.isBefore(shift.getCheckInTime().plusMinutes(1))) throw new BadRequestException("Check-out quá sớm.");
+        */
+        
         LocalTime schedEndTime = shift.getEndTime();
-        LocalDate schedDate = shift.getShiftDate();
-        LocalDateTime schedEndDt = LocalDateTime.of(schedDate, schedEndTime);
-        if (schedEndTime.isBefore(shift.getStartTime())) {
-            schedEndDt = schedEndDt.plusDays(1); // Xử lý ca đêm
-        }
+        LocalDateTime schedEndDt = LocalDateTime.of(shift.getShiftDate(), schedEndTime);
+        if (schedEndTime.isBefore(shift.getStartTime())) schedEndDt = schedEndDt.plusDays(1);
 
-        int actualMinutes;
-        if (now.isBefore(schedEndDt)) {
-            actualMinutes = shift.getDurationMinutes();
-            log.info("[SHIFT CHECK-OUT] Early checkout for shift={}. Using durationMinutes: {}", shiftId, actualMinutes);
-        } else {
-            actualMinutes = (int) java.time.temporal.ChronoUnit.MINUTES.between(shift.getCheckInTime(), now);
-        }
+        int actualMinutes = now.isBefore(schedEndDt) ? shift.getDurationMinutes() 
+                : (int) java.time.temporal.ChronoUnit.MINUTES.between(shift.getCheckInTime(), now);
 
         shift.setCheckOutTime(now);
         shift.setCheckOutLat(request.getLatitude());
         shift.setCheckOutLng(request.getLongitude());
-        shift.setCheckOutDistanceMeters(hasCoords ? distance : null);
+        shift.setCheckOutDistanceMeters(shift.getCustomer().getLatitude() != null ? distance : null);
         shift.setActualMinutes(actualMinutes);
         shift.setStatus(ShiftStatus.COMPLETED);
         shiftRepository.save(shift);
-
-        log.info("Check-out: shift={} distance={}m actualMinutes={}", shiftId, Math.round(distance), actualMinutes);
-
         return CheckInResponse.builder()
-                .withinGeofence(!hasCoords || distance <= geofenceRadiusMeters)
-                .distanceMeters(hasCoords ? distance : 0)
-                .geofenceRadiusMeters(hasCoords ? geofenceRadiusMeters : -1)
+                .withinGeofence(shift.getCustomer().getLatitude() == null || distance <= geofenceRadiusMeters)
+                .distanceMeters(distance)
+                .geofenceRadiusMeters(geofenceRadiusMeters)
                 .actionTime(now)
                 .shiftStatus(shift.getStatus())
-                .message("Check-out thành công. Thực tế làm việc: " + actualMinutes + " phút.")
+                .message("Check-out thành công.")
                 .build();
     }
 
-    /** Haversine distance (meters) giữa GPS và vị trí khách hàng. */
     private double computeDistance(Customer customer, double lat, double lng) {
         if (customer.getLatitude() == null || customer.getLongitude() == null) return 0;
         return haversine(customer.getLatitude(), customer.getLongitude(), lat, lng);
     }
 
     private double haversine(double lat1, double lng1, double lat2, double lng2) {
-        final int R = 6_371_000; // bán kính Trái Đất (meters)
+        final int R = 6_371_000;
         double dLat = Math.toRadians(lat2 - lat1);
         double dLng = Math.toRadians(lng2 - lng1);
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
-                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
-                * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    }
-
-    /** Lấy địa chỉ đầy đủ từ Customer entity. */
-    private String buildAddress(Customer c) {
-        return c.getAddress();
     }
 }

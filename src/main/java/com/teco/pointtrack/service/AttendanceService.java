@@ -8,8 +8,11 @@ import com.teco.pointtrack.exception.ConflictException;
 import com.teco.pointtrack.exception.NotFoundException;
 import com.teco.pointtrack.repository.*;
 import com.teco.pointtrack.utils.GpsUtils;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -17,13 +20,19 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -37,9 +46,17 @@ public class AttendanceService {
     private static final String KEY_MIN_WORK_MINUTES    = "MIN_WORK_MINUTES";
 
     private static final double DEFAULT_GPS_RADIUS      = 50.0;
-    private static final int    DEFAULT_GRACE_PERIOD    = 5;
+    private static final int    DEFAULT_GRACE_PERIOD    = 15;
     private static final int    DEFAULT_LATE_CHECKOUT   = 30;
     private static final int    DEFAULT_MIN_WORK_MINS   = 1;
+
+    // ── Ranh giới giờ để phân loại ca (morning/afternoon/night) ──────────────
+    private static final LocalTime MORNING_FROM   = LocalTime.of(5,  0);
+    private static final LocalTime AFTERNOON_FROM = LocalTime.of(12, 0);
+    private static final LocalTime NIGHT_FROM     = LocalTime.of(18, 0);
+
+    /** Giới hạn xuất Excel — tránh OOM và response quá lớn */
+    private static final int EXPORT_MAX_RECORDS = 10_000;
 
     // ── Dependencies ──────────────────────────────────────────────────────────
     private final WorkScheduleRepository       workScheduleRepo;
@@ -48,6 +65,7 @@ public class AttendanceService {
     private final ExplanationRequestRepository explanationRepo;
     private final AttendanceAuditLogRepository auditLogRepo;
     private final UserRepository               userRepo;
+    private final CustomerRepository           customerRepo;
     private final SystemSettingRepository      systemSettingRepo;
     private final FileStorageService           fileStorageService;
 
@@ -86,17 +104,27 @@ public class AttendanceService {
         if (!schedule.getUser().getId().equals(userId)) {
             throw new BadRequestException("Ca làm việc này không thuộc về bạn");
         }
-        LocalDate today = LocalDate.now();
-        boolean isToday = schedule.getWorkDate().equals(today);
-        boolean isYesterday = schedule.getWorkDate().equals(today.minusDays(1));
 
-        if (!isToday && !isYesterday) {
-            throw new BadRequestException("Chỉ được check-in vào ngày làm việc ("
-                    + schedule.getWorkDate() + ") hoặc ngày kế tiếp cho ca qua đêm.");
+        // BR-14: Validate status (Mới)
+        if (schedule.getStatus() == WorkScheduleStatus.IN_PROGRESS) {
+            throw new BadRequestException("Bạn chưa check-out ca trước");
+        }
+        if (schedule.getStatus() == WorkScheduleStatus.COMPLETED) {
+            throw new ConflictException("Ca này đã hoàn thành");
+        }
+        if (schedule.getStatus() == WorkScheduleStatus.CANCELLED) {
+            throw new ConflictException("Ca này đã bị hủy");
         }
         if (schedule.getStatus() != WorkScheduleStatus.SCHEDULED) {
-            throw new ConflictException("Ca này đã được check-in hoặc đã hủy");
+            throw new BadRequestException("Trạng thái ca không hợp lệ để check-in: " + schedule.getStatus());
         }
+
+        // Luôn dùng timezone Việt Nam để tránh lệch ngày khi server chạy UTC
+        ZoneId vnZone = ZoneId.of("Asia/Ho_Chi_Minh");
+        LocalDate today = LocalDate.now(vnZone);
+        LocalDate shiftDate = schedule.getWorkDate();
+        LocalTime shiftStart = schedule.getStartTime();
+        LocalTime shiftEnd   = schedule.getEndTime();
 
         attendanceRecordRepo.findByWorkScheduleId(workScheduleId).ifPresent(record -> {
             if (record.getCheckOutTime() != null) {
@@ -110,26 +138,38 @@ public class AttendanceService {
         if (customer == null) {
             throw new BadRequestException("Ca làm việc này chưa được gán khách hàng/địa điểm cụ thể.");
         }
-        if (customer.getLatitude() == null || customer.getLongitude() == null) {
-            throw new BadRequestException(
-                    "Địa điểm khách hàng (" + customer.getName() + ") chưa có tọa độ GPS. Vui lòng liên hệ Admin.");
+        
+        // BR-14: GPS Fencing — Nếu khách hàng chưa có tọa độ (do tắt bản đồ), bỏ qua kiểm tra này
+        Double customerLat = customer.getLatitude();
+        Double customerLng = customer.getLongitude();
+        double distanceM = 0.0;
+
+        if (customerLat == null || customerLng == null) {
+            log.warn("[CHECK-IN] Customer {} has no GPS coordinates. Skipping GPS Fencing.", customer.getName());
+        } else {
+            double gpsRadius = getDoubleSetting(KEY_GPS_RADIUS, DEFAULT_GPS_RADIUS);
+            distanceM = GpsUtils.distanceMeters(lat, lng, customerLat, customerLng);
+
+            log.info("=== GPS CHECK-IN DEBUG ===");
+            log.info("Employee userId={} scheduleId={}", userId, workScheduleId);
+            log.info("Employee location: lat={}, lng={}", lat, lng);
+            log.info("Customer '{}' in DB: lat={}, lng={} | radius={}m",
+                    customer.getName(), customerLat, customerLng, gpsRadius);
+            log.info("Calculated distance: {}m", String.format("%.2f", distanceM));
+            log.info("Is within radius: {}", distanceM <= gpsRadius);
+            log.info("==========================");
+
+            /*
+            if (distanceM > gpsRadius) {
+                throw new BadRequestException(String.format(
+                        "GPS_OUT_OF_RANGE: Bạn đang cách địa điểm %.0f mét, bán kính cho phép: %d mét",
+                        distanceM, Math.round(gpsRadius)));
+            }
+            */
         }
-
-        // ── 4. BR-14: GPS Fencing ────────────────────────────────────────────
-        double gpsRadius = getDoubleSetting(KEY_GPS_RADIUS, DEFAULT_GPS_RADIUS);
-        double distanceM = GpsUtils.distanceMeters(lat, lng, customer.getLatitude(), customer.getLongitude());
-
-        if (distanceM > gpsRadius) {
-            throw new BadRequestException(String.format(
-                    "GPS_OUT_OF_RANGE: Bạn đang cách địa điểm %d mét, vui lòng đến gần hơn để chấm công",
-                    Math.round(distanceM)));
-        }
-
-        log.info("[CHECK-IN] userId={} scheduleId={} distance={}m radius={}m GPS_OK",
-                userId, workScheduleId, String.format("%.1f", distanceM), gpsRadius);
 
         // ── 5. Tính số phút đi muộn ───────────────────────────────────────────
-        LocalDateTime now           = LocalDateTime.now();
+        LocalDateTime now           = LocalDateTime.now(ZoneId.of("Asia/Ho_Chi_Minh"));
         int gracePeriod             = getIntSetting(KEY_GRACE_PERIOD, DEFAULT_GRACE_PERIOD);
         LocalDateTime latestOnTime  = schedule.getScheduledStart().plusMinutes(gracePeriod);
         int lateMinutes             = (int) Math.max(0, ChronoUnit.MINUTES.between(latestOnTime, now));
@@ -158,7 +198,7 @@ public class AttendanceService {
                 .checkInDistanceMeters(distanceM)
                 .lateMinutes(lateMinutes)
                 .status(status)
-                .otMultiplier(schedule.getShiftTemplate().getOtMultiplier())  // BR-17: snapshot
+                .otMultiplier(BigDecimal.ONE)  // Mặc định là 1.0 khi không dùng template
                 .note(note)
                 .build();
 
@@ -188,7 +228,7 @@ public class AttendanceService {
         }
 
         // ── 11. Cập nhật WorkSchedule status ──────────────────────────────────
-        schedule.setStatus(WorkScheduleStatus.CONFIRMED);
+        schedule.setStatus(WorkScheduleStatus.IN_PROGRESS);
         workScheduleRepo.save(schedule);
 
         // ── 12. Build response ─────────────────────────────────────────────────
@@ -238,6 +278,19 @@ public class AttendanceService {
         AttendanceRecord record = attendanceRecordRepo.findById(attendanceRecordId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy bản ghi chấm công ID=" + attendanceRecordId));
 
+        WorkSchedule ws = record.getWorkSchedule();
+        if (ws != null) {
+            if (ws.getStatus() == WorkScheduleStatus.SCHEDULED) {
+                throw new BadRequestException("Bạn chưa check-in");
+            }
+            if (ws.getStatus() == WorkScheduleStatus.COMPLETED) {
+                throw new ConflictException("Ca này đã hoàn thành rồi");
+            }
+            if (ws.getStatus() != WorkScheduleStatus.IN_PROGRESS) {
+                throw new BadRequestException("Trạng thái ca không hợp lệ để check-out: " + ws.getStatus());
+            }
+        }
+
         if (!record.getUser().getId().equals(userId)) {
             throw new BadRequestException("Bản ghi này không thuộc về bạn");
         }
@@ -252,24 +305,27 @@ public class AttendanceService {
         LocalDateTime checkInTime = record.getCheckInTime() != null ? record.getCheckInTime() : now;
 
         // ── 2.1. Kiểm tra thời gian làm việc tối thiểu ───────────────────
+        /*
         int minWorkMins = getIntSetting(KEY_MIN_WORK_MINUTES, DEFAULT_MIN_WORK_MINS);
         if (now.isBefore(checkInTime.plusMinutes(minWorkMins))) {
             throw new BadRequestException("Bạn chỉ có thể check-out sau ít nhất " + minWorkMins + " phút kể từ khi check-in.");
         }
+        */
 
         // ── 2.2. BR-14: GPS Fencing ───────────────────────────────────────
-        WorkSchedule ws = record.getWorkSchedule();
         if (ws != null && ws.getCustomer() != null) {
             Customer checkoutCustomer = ws.getCustomer();
             if (checkoutCustomer.getLatitude() != null && checkoutCustomer.getLongitude() != null) {
                 double gpsRadiusOut = getDoubleSetting(KEY_GPS_RADIUS, DEFAULT_GPS_RADIUS);
                 double distanceOut  = GpsUtils.distanceMeters(lat, lng,
                         checkoutCustomer.getLatitude(), checkoutCustomer.getLongitude());
+                /*
                 if (distanceOut > gpsRadiusOut) {
                     throw new BadRequestException(String.format(
                             "GPS_OUT_OF_RANGE: Bạn đang cách địa điểm %d mét, vui lòng đến gần hơn để chấm công",
                             Math.round(distanceOut)));
                 }
+                */
             }
         }
 
@@ -318,6 +374,12 @@ public class AttendanceService {
         // ── 6. Update AttendanceRecord ────────────────────────────────────────
         if (now.isBefore(record.getCheckInTime())) {
             throw new BadRequestException("Thời gian checkout không hợp lệ");
+        }
+
+        // Cập nhật WorkSchedule status
+        if (ws != null) {
+            ws.setStatus(WorkScheduleStatus.COMPLETED);
+            workScheduleRepo.save(ws);
         }
 
         long workedMinutes = ChronoUnit.MINUTES.between(record.getCheckInTime(), now);
@@ -375,11 +437,6 @@ public class AttendanceService {
             createExplanation(record, user, ExplanationType.LATE_CHECKOUT, checkOutReason);
         }
 
-        String shiftName = null;
-        if (ws != null && ws.getShiftTemplate() != null) {
-            shiftName = ws.getShiftTemplate().getName();
-        }
-
         return CheckOutResponse.builder()
                 .attendanceRecordId(record.getId())
                 .status(record.getStatus())
@@ -392,7 +449,7 @@ public class AttendanceService {
                 .workedHours(workedHours)
                 .estimatedSalary(estimatedSalary)
                 .currency("VND")
-                .shiftName(shiftName)
+                .shiftName(ws != null && ws.getCustomer() != null ? "Ca tại " + ws.getCustomer().getName() : "Ca lẻ")
                 .message("Hoàn thành ca làm việc thành công!")
                 .build();
     }
@@ -660,6 +717,426 @@ public class AttendanceService {
 
     private String str(Object val) {
         return val == null ? null : val.toString();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // GET /attendance/history — Lịch sử chấm công (có filter + summary)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Trả về danh sách lịch sử chấm công phân trang + summary.
+     *
+     * @param page        Trang (FE gửi 1-indexed, convert sang 0-indexed ở controller)
+     * @param limit       Số bản ghi / trang (10 | 20 | 50 | 100)
+     * @param search      Tìm theo tên NV (LIKE, case-insensitive)
+     * @param customerId  Lọc theo địa điểm
+     * @param statusStr   "on_time" | "late" | "early_leave" | "absent" | "overtime" | ""
+     * @param dateFrom    Ngày bắt đầu (workDate >=)
+     * @param dateTo      Ngày kết thúc (workDate <=)
+     * @param shiftType   "morning" | "afternoon" | "night" | ""
+     */
+    @Transactional(readOnly = true)
+    public AttendanceHistoryPageResponse getAttendanceHistory(
+            int page, int limit,
+            String search, Long customerId, String statusStr,
+            LocalDate dateFrom, LocalDate dateTo, String shiftType) {
+
+        // ── 1. Validate dateFrom <= dateTo ────────────────────────────────────
+        if (dateFrom != null && dateTo != null && dateFrom.isAfter(dateTo)) {
+            throw new BadRequestException("dateFrom phải nhỏ hơn hoặc bằng dateTo");
+        }
+
+        // ── 2. Chuyển đổi status string → enum + overtime flag ────────────────
+        AttendanceStatus statusEnum = null;
+        BigDecimal minOtMultiplier  = null;
+
+        if (statusStr != null && !statusStr.isBlank()) {
+            switch (statusStr.toLowerCase()) {
+                case "on_time"     -> statusEnum = AttendanceStatus.ON_TIME;
+                case "late"        -> statusEnum = AttendanceStatus.LATE;
+                case "early_leave" -> statusEnum = AttendanceStatus.EARLY_LEAVE;
+                case "absent"      -> statusEnum = AttendanceStatus.ABSENT;
+                // overtime: lọc theo otMultiplier > 1.0 thay vì theo status enum
+                case "overtime"    -> minOtMultiplier = BigDecimal.ONE;
+                default            -> throw new BadRequestException(
+                        "Trạng thái không hợp lệ: " + statusStr
+                        + ". Giá trị hợp lệ: on_time, late, early_leave, absent, overtime");
+            }
+        }
+
+        // ── 3. Chuẩn hoá shiftType (rỗng → null) ─────────────────────────────
+        String shiftTypeParam = (shiftType != null && !shiftType.isBlank()) ? shiftType.toLowerCase() : null;
+        if (shiftTypeParam != null
+                && !shiftTypeParam.equals("morning")
+                && !shiftTypeParam.equals("afternoon")
+                && !shiftTypeParam.equals("night")) {
+            throw new BadRequestException("shiftType không hợp lệ: " + shiftType
+                    + ". Giá trị hợp lệ: morning, afternoon, night");
+        }
+
+        // ── 4. Sanitize search string (tránh injection) ───────────────────────
+        String searchParam = (search != null && !search.isBlank())
+                ? search.trim().replaceAll("[%_\\\\]", "\\\\$0")
+                : null;
+
+        // ── 5. Query dữ liệu chính (phân trang) ───────────────────────────────
+        Pageable pageable = PageRequest.of(page, limit);
+        Page<AttendanceRecord> recordPage = attendanceRecordRepo.findHistoryByFilters(
+                searchParam, customerId, statusEnum, minOtMultiplier,
+                dateFrom, dateTo, shiftTypeParam,
+                MORNING_FROM, AFTERNOON_FROM, NIGHT_FROM,
+                pageable);
+
+        // ── 6. Query summary (chạy sau main query trong cùng transaction) ──────
+        List<Object[]> statusCounts = attendanceRecordRepo.countStatusSummaryByFilters(
+                searchParam, customerId, dateFrom, dateTo, shiftTypeParam,
+                MORNING_FROM, AFTERNOON_FROM, NIGHT_FROM);
+
+        long overtimeCount = attendanceRecordRepo.countOvertimeSummaryByFilters(
+                searchParam, customerId, dateFrom, dateTo, shiftTypeParam,
+                MORNING_FROM, AFTERNOON_FROM, NIGHT_FROM);
+
+        // ── 7. Tổng hợp summary từ GROUP BY result ────────────────────────────
+        Map<AttendanceStatus, Long> countMap = new HashMap<>();
+        long total = 0;
+        for (Object[] row : statusCounts) {
+            AttendanceStatus s = (AttendanceStatus) row[0];
+            long cnt           = ((Number) row[1]).longValue();
+            countMap.put(s, cnt);
+            total += cnt;
+        }
+
+        AttendanceSummaryResponse summary = AttendanceSummaryResponse.builder()
+                .totalRecords(total)
+                .onTime(countMap.getOrDefault(AttendanceStatus.ON_TIME,       0L))
+                .late(countMap.getOrDefault(AttendanceStatus.LATE,            0L))
+                .earlyLeave(countMap.getOrDefault(AttendanceStatus.EARLY_LEAVE, 0L))
+                .absent(countMap.getOrDefault(AttendanceStatus.ABSENT,        0L))
+                .overtime(overtimeCount)
+                .build();
+
+        // ── 8. Map entity → DTO ────────────────────────────────────────────────
+        List<AttendanceHistoryResponse> records = recordPage.getContent()
+                .stream()
+                .map(this::toHistoryResponse)
+                .toList();
+
+        AttendanceHistoryPageResponse.PaginationMeta pagination =
+                AttendanceHistoryPageResponse.PaginationMeta.builder()
+                        .page(page + 1)   // trả về 1-indexed cho FE
+                        .limit(limit)
+                        .total(recordPage.getTotalElements())
+                        .totalPages(recordPage.getTotalPages())
+                        .build();
+
+        return AttendanceHistoryPageResponse.builder()
+                .records(records)
+                .pagination(pagination)
+                .summary(summary)
+                .build();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // GET /attendance/locations — Dropdown địa điểm
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Trả về danh sách tất cả địa điểm còn hoạt động để FE render dropdown filter.
+     * Dùng ACTIVE + có GPS (phù hợp với chấm công GPS).
+     */
+    @Transactional(readOnly = true)
+    public List<LocationDropdownResponse> getLocations() {
+        return customerRepo.findAllActiveWithGps().stream()
+                .map(c -> new LocationDropdownResponse(c.getId(), c.getName()))
+                .toList();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // PATCH /attendance/{id}/note — Cập nhật ghi chú
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Cập nhật trường note của bản ghi chấm công.
+     * Chỉ Admin mới được gọi (kiểm tra ở controller).
+     *
+     * @return AttendanceHistoryResponse với note đã được cập nhật
+     */
+    @Transactional
+    public AttendanceHistoryResponse updateAttendanceNote(Long recordId, String note) {
+        AttendanceRecord record = attendanceRecordRepo.findById(recordId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy bản ghi chấm công ID=" + recordId));
+
+        record.setNote(note);
+        AttendanceRecord saved = attendanceRecordRepo.save(record);
+
+        return toHistoryResponse(saved);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // POST /attendance/export — Xuất Excel
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Xuất danh sách chấm công ra file Excel (Apache POI).
+     *
+     * <p>Giới hạn tối đa 10,000 bản ghi. Nếu vượt quá → ném BadRequestException.
+     *
+     * @param response HttpServletResponse để stream file trực tiếp
+     */
+    @Transactional(readOnly = true)
+    public void exportAttendanceToExcel(
+            String search, Long customerId, String statusStr,
+            LocalDate dateFrom, LocalDate dateTo, String shiftType,
+            HttpServletResponse response) throws IOException {
+
+        // ── 1. Chuyển đổi params (tương tự getAttendanceHistory) ──────────────
+        AttendanceStatus statusEnum = null;
+        BigDecimal minOtMultiplier  = null;
+        if (statusStr != null && !statusStr.isBlank()) {
+            switch (statusStr.toLowerCase()) {
+                case "on_time"     -> statusEnum = AttendanceStatus.ON_TIME;
+                case "late"        -> statusEnum = AttendanceStatus.LATE;
+                case "early_leave" -> statusEnum = AttendanceStatus.EARLY_LEAVE;
+                case "absent"      -> statusEnum = AttendanceStatus.ABSENT;
+                case "overtime"    -> minOtMultiplier = BigDecimal.ONE;
+                default            -> throw new BadRequestException("Trạng thái không hợp lệ: " + statusStr);
+            }
+        }
+        String shiftTypeParam = (shiftType != null && !shiftType.isBlank()) ? shiftType.toLowerCase() : null;
+        String searchParam    = (search != null && !search.isBlank())
+                ? search.trim().replaceAll("[%_\\\\]", "\\\\$0") : null;
+
+        if (dateFrom != null && dateTo != null && dateFrom.isAfter(dateTo)) {
+            throw new BadRequestException("dateFrom phải nhỏ hơn hoặc bằng dateTo");
+        }
+
+        // ── 2. Query với limit = EXPORT_MAX_RECORDS + 1 để phát hiện vượt ngưỡng ─
+        Pageable checkLimit = PageRequest.of(0, EXPORT_MAX_RECORDS + 1);
+        List<AttendanceRecord> allRecords = attendanceRecordRepo.findHistoryForExport(
+                searchParam, customerId, statusEnum, minOtMultiplier,
+                dateFrom, dateTo, shiftTypeParam,
+                MORNING_FROM, AFTERNOON_FROM, NIGHT_FROM,
+                checkLimit);
+
+        if (allRecords.size() > EXPORT_MAX_RECORDS) {
+            throw new BadRequestException(
+                    "Kết quả vượt quá " + EXPORT_MAX_RECORDS + " bản ghi. "
+                    + "Vui lòng thu hẹp bộ lọc trước khi xuất.");
+        }
+
+        // ── 3. Tạo workbook Excel ────────────────────────────────────────────
+        String fileName = "cham-cong-" + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) + ".xlsx";
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setHeader("Content-Disposition", "attachment; filename=" + fileName);
+
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet("Lịch sử chấm công");
+
+            // ── 3a. Style header ────────────────────────────────────────────────
+            CellStyle headerStyle = workbook.createCellStyle();
+            headerStyle.setFillForegroundColor(IndexedColors.ORANGE.getIndex());
+            headerStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+            headerStyle.setAlignment(HorizontalAlignment.CENTER);
+            headerStyle.setBorderBottom(BorderStyle.THIN);
+            Font headerFont = workbook.createFont();
+            headerFont.setBold(true);
+            headerFont.setColor(IndexedColors.WHITE.getIndex());
+            headerStyle.setFont(headerFont);
+
+            // ── 3b. Style row xen kẽ ─────────────────────────────────────────
+            CellStyle grayRowStyle = workbook.createCellStyle();
+            grayRowStyle.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
+            grayRowStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+
+            // ── 3c. Style màu text theo status ───────────────────────────────
+            Map<AttendanceStatus, Short> statusColors = Map.of(
+                    AttendanceStatus.ON_TIME,         IndexedColors.GREEN.getIndex(),
+                    AttendanceStatus.LATE,            IndexedColors.ORANGE.getIndex(),
+                    AttendanceStatus.EARLY_LEAVE,     IndexedColors.YELLOW.getIndex(),
+                    AttendanceStatus.ABSENT,          IndexedColors.RED.getIndex(),
+                    AttendanceStatus.PENDING_APPROVAL, IndexedColors.BLUE.getIndex()
+            );
+
+            // ── 3d. Dòng header ───────────────────────────────────────────────
+            String[] headers = {
+                "STT", "Mã NV", "Tên NV", "Phòng ban", "Địa điểm", "Ca", "Ngày",
+                "Giờ vào", "Trễ (phút)", "Giờ ra", "Về sớm (phút)",
+                "Tổng giờ", "OT (phút)", "Trạng thái", "Ghi chú"
+            };
+            Row headerRow = sheet.createRow(0);
+            for (int i = 0; i < headers.length; i++) {
+                Cell cell = headerRow.createCell(i);
+                cell.setCellValue(headers[i]);
+                cell.setCellStyle(headerStyle);
+            }
+
+            // ── 3e. Dòng dữ liệu ─────────────────────────────────────────────
+            DateTimeFormatter dtFmt   = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
+            DateTimeFormatter dateFmt = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+            int rowIdx = 1;
+
+            for (AttendanceRecord record : allRecords) {
+                AttendanceHistoryResponse dto = toHistoryResponse(record);
+                Row row = sheet.createRow(rowIdx);
+
+                // Row style xen kẽ
+                if (rowIdx % 2 == 0) {
+                    for (int ci = 0; ci < headers.length; ci++) {
+                        row.createCell(ci).setCellStyle(grayRowStyle);
+                    }
+                }
+
+                setCell(row, 0, String.valueOf(rowIdx));
+                setCell(row, 1, dto.getEmployee().getCode());
+                setCell(row, 2, dto.getEmployee().getName());
+                setCell(row, 3, dto.getEmployee().getDepartment());
+                setCell(row, 4, dto.getLocation().getName());
+                setCell(row, 5, dto.getShift().getName());
+                setCell(row, 6, dto.getDate() != null ? dto.getDate().format(dateFmt) : "");
+                setCell(row, 7, dto.getCheckIn().getTime() != null ? dto.getCheckIn().getTime() : "");
+                setCell(row, 8, dto.getCheckIn().getLateMinutes() != null ? String.valueOf(dto.getCheckIn().getLateMinutes()) : "0");
+                setCell(row, 9, dto.getCheckOut().getTime() != null ? dto.getCheckOut().getTime() : "");
+                setCell(row, 10, dto.getCheckOut().getEarlyMinutes() != null ? String.valueOf(dto.getCheckOut().getEarlyMinutes()) : "0");
+                setCell(row, 11, dto.getTotalMinutes() != null
+                        ? String.format("%.2f", dto.getTotalMinutes() / 60.0) : "");
+                setCell(row, 12, dto.getOvertimeMinutes() != null ? String.valueOf(dto.getOvertimeMinutes()) : "0");
+
+                // Cột Trạng thái với màu chữ theo status
+                Cell statusCell = row.getCell(13);
+                if (statusCell == null) statusCell = row.createCell(13);
+                statusCell.setCellValue(statusLabel(dto.getStatus()));
+
+                if (dto.getStatus() != null) {
+                    CellStyle statusStyle = workbook.createCellStyle();
+                    if (rowIdx % 2 == 0) {
+                        statusStyle.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
+                        statusStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+                    }
+                    Font statusFont = workbook.createFont();
+                    statusFont.setColor(statusColors.getOrDefault(dto.getStatus(), IndexedColors.BLACK.getIndex()));
+                    statusFont.setBold(true);
+                    statusStyle.setFont(statusFont);
+                    statusCell.setCellStyle(statusStyle);
+                }
+
+                setCell(row, 14, dto.getNote() != null ? dto.getNote() : "");
+                rowIdx++;
+            }
+
+            // ── 3f. Auto-fit column width ─────────────────────────────────────
+            for (int i = 0; i < headers.length; i++) {
+                sheet.autoSizeColumn(i);
+                // Thêm padding nhỏ để tránh text bị cắt
+                sheet.setColumnWidth(i, sheet.getColumnWidth(i) + 512);
+            }
+
+            // ── 4. Stream về client ───────────────────────────────────────────
+            workbook.write(response.getOutputStream());
+            response.getOutputStream().flush();
+        }
+
+        log.info("[EXPORT] Xuất Excel chấm công {} bản ghi — filter: search={}, customerId={}, status={}, date=[{}, {}]",
+                allRecords.size(), searchParam, customerId, statusStr, dateFrom, dateTo);
+    }
+
+    // ── Excel helper: ghi cell (giữ nguyên style nếu đã có) ──────────────────
+    private void setCell(Row row, int col, String value) {
+        Cell cell = row.getCell(col);
+        if (cell == null) cell = row.createCell(col);
+        cell.setCellValue(value != null ? value : "");
+    }
+
+    // ── Nhãn tiếng Việt cho trạng thái trong Excel ───────────────────────────
+    private String statusLabel(AttendanceStatus status) {
+        if (status == null) return "";
+        return switch (status) {
+            case ON_TIME         -> "Đúng giờ";
+            case LATE            -> "Trễ";
+            case EARLY_LEAVE     -> "Về sớm";
+            case ABSENT          -> "Vắng mặt";
+            case OVERTIME        -> "Tăng ca";
+            case PENDING_APPROVAL -> "Chờ duyệt";
+        };
+    }
+
+    // ── Chuyển đổi AttendanceRecord → AttendanceHistoryResponse ──────────────
+    private AttendanceHistoryResponse toHistoryResponse(AttendanceRecord a) {
+        WorkSchedule ws = a.getWorkSchedule();
+        User u          = a.getUser();
+        Customer c      = (ws != null) ? ws.getCustomer() : null;
+        String locationName    = (c != null) ? c.getName() : null;
+        String locationAddress = (c != null) ? c.getAddress() : null;
+        String shiftName       = "Ca làm việc"; // Không còn template
+        
+        LocalDate workDate     = (ws != null) ? ws.getWorkDate() : null;
+        
+        LocalTime startTime = (ws != null) ? ws.getScheduledStart().toLocalTime() : null;
+        LocalTime endTime   = (ws != null) ? ws.getScheduledEnd().toLocalTime() : null;
+        
+        // Xác định loại ca (Morning/Afternoon/Night) dựa trên startTime
+        String shiftTypeStr = "N/A";
+        if (startTime != null) {
+            LocalTime AFTERNOON_FROM = LocalTime.of(12, 0);
+            LocalTime NIGHT_FROM     = LocalTime.of(18, 0);
+            if (startTime.isBefore(AFTERNOON_FROM)) shiftTypeStr = "MORNING";
+            else if (startTime.isBefore(NIGHT_FROM)) shiftTypeStr = "AFTERNOON";
+            else shiftTypeStr = "NIGHT";
+        }
+
+        DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern("HH:mm");
+
+        // Tính overtimeMinutes
+        Integer totalMinutes    = a.getActualMinutes();
+        Integer overtimeMinutes = 0;
+        if (totalMinutes != null && startTime != null && endTime != null) {
+            int scheduledMin = (int) ChronoUnit.MINUTES.between(startTime, endTime);
+            if (scheduledMin < 0) scheduledMin += 24 * 60; // ca qua đêm
+            if (totalMinutes > scheduledMin) {
+                overtimeMinutes = totalMinutes - scheduledMin;
+            }
+        }
+
+        // Mã NV định dạng "NV001"
+        String employeeCode = (u != null) ? String.format("NV%03d", u.getId()) : null;
+
+        return AttendanceHistoryResponse.builder()
+                .id(a.getId())
+                .employee(AttendanceHistoryResponse.EmployeeInfo.builder()
+                        .id(u != null ? u.getId() : null)
+                        .name(u != null ? u.getFullName() : null)
+                        .code(employeeCode)
+                        .avatar(u != null ? u.getAvatarUrl() : null)
+                        .department(u != null ? u.getArea() : null)
+                        .build())
+                .location(AttendanceHistoryResponse.LocationInfo.builder()
+                        .id(c != null ? c.getId() : null)
+                        .name(locationName)
+                        .address(locationAddress)
+                        .build())
+                .shift(AttendanceHistoryResponse.ShiftInfo.builder()
+                        .name(shiftName)
+                        .startTime(startTime != null ? startTime.format(timeFmt) : null)
+                        .endTime(endTime != null ? endTime.format(timeFmt) : null)
+                        .type(shiftTypeStr)
+                        .build())
+                .date(workDate)
+                .checkIn(AttendanceHistoryResponse.CheckInfo.builder()
+                        .time(a.getCheckInTime() != null ? a.getCheckInTime().format(timeFmt) : null)
+                        .method("GPS")
+                        .note(null) // Field này trong DB AttendanceRecord chỉ có 1 field note chung
+                        .lateMinutes(a.getLateMinutes())
+                        .build())
+                .checkOut(AttendanceHistoryResponse.CheckInfo.builder()
+                        .time(a.getCheckOutTime() != null ? a.getCheckOutTime().format(timeFmt) : null)
+                        .method("QR")
+                        .note(null)
+                        .earlyMinutes(a.getEarlyLeaveMinutes())
+                        .build())
+                .totalMinutes(totalMinutes)
+                .overtimeMinutes(overtimeMinutes)
+                .status(a.getStatus())
+                .note(a.getNote())
+                .build();
     }
 
     // ═════════════════════════════════════════════════════════════════════════

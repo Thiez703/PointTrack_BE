@@ -11,9 +11,8 @@ import lombok.Data;
 @Data
 public class VerifyOtpRequest {
 
-    @NotBlank(message = "Số điện thoại không được để trống")
-    @Pattern(regexp = "^0\\d{9}$", message = "SĐT phải 10 chữ số bắt đầu bằng 0")
-    String phoneNumber;
+    @NotBlank(message = "Thông tin đăng nhập không được để trống")
+    String contact;
 
     @NotBlank(message = "Mã OTP không được để trống")
     @Pattern(regexp = "^\\d{6}$", message = "Mã OTP gồm 6 chữ số")

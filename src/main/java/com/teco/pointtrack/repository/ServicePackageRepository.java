@@ -14,6 +14,4 @@ public interface ServicePackageRepository extends JpaRepository<ServicePackage, 
     Optional<ServicePackage> findByIdAndStatusNot(Long id, PackageStatus status);
 
     List<ServicePackage> findAllByOrderByCreatedAtDesc();
-
-    boolean existsByTemplateIdAndStatusNot(Long templateId, PackageStatus status);
 }

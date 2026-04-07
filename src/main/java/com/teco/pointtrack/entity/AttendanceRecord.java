@@ -88,8 +88,8 @@ public class AttendanceRecord extends BaseEntity {
     AttendanceStatus status = AttendanceStatus.ON_TIME;
 
     /**
-     * Hệ số OT — snapshot từ ShiftTemplate tại thời điểm check-in.
-     * BR-17: 1.0 = NORMAL, 1.5 = OT_EMERGENCY (BR-18), 2.0–3.0 = HOLIDAY
+     * Hệ số OT — snapshot tại thời điểm check-in.
+     * BR-17: 1.0 = NORMAL, 1.5 = OT_EMERGENCY (BR-18), 2.0-3.0 = HOLIDAY
      */
     @Column(name = "ot_multiplier", nullable = false, precision = 3, scale = 1)
     @Builder.Default

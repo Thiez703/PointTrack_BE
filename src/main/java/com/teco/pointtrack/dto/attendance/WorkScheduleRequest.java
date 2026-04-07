@@ -29,9 +29,7 @@ public class WorkScheduleRequest {
     @NotBlank(message = "address không được trống")
     String address;
 
-    @NotNull(message = "lat không được trống")
     Double lat;
 
-    @NotNull(message = "lng không được trống")
     Double lng;
 }

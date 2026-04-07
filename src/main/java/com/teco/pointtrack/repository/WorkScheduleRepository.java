@@ -25,8 +25,4 @@ public interface WorkScheduleRepository extends JpaRepository<WorkSchedule, Long
                                                @Param("date") LocalDate date);
 
     boolean existsByUserIdAndWorkDate(Long userId, LocalDate date);
-
-    /** Kiểm tra trùng lịch: cùng NV, cùng ca mẫu, cùng ngày */
-    boolean existsByUserIdAndShiftTemplateIdAndWorkDateAndDeletedAtIsNull(
-            Long userId, Long shiftTemplateId, LocalDate workDate);
 }

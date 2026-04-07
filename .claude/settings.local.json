@@ -51,7 +51,25 @@
       "Bash(cmd.exe /c \"mvnw.cmd clean package -DskipTests\")",
       "Bash(cmd.exe /c \"mvnw.cmd clean package -DskipTests 2>&1\")",
       "Bash(powershell.exe -Command \"& .\\\\mvnw.cmd clean package -DskipTests\")",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(cmd.exe /c \"mvnw.cmd clean compile 2>&1\")",
+      "Bash(cmd.exe /c \"mvnw.cmd clean compile\")",
+      "Bash(bash mvnw:*)",
+      "Bash(JAVA_HOME=\"/c/Program Files/Eclipse Adoptium/jdk-25.0.1.8-hotspot\" bash mvnw.cmd clean compile)",
+      "Bash(MVN=~/.m2/wrapper/dists/apache-maven-3.9.6-bin/439sdfsg2nbdob9ciift5h5nse/apache-maven-3.9.6/bin/mvn)",
+      "Bash(\"$MVN\" clean:*)",
+      "Bash(grep -v \"^$\")",
+      "Bash(\"$MVN\" test:*)",
+      "Bash(cmd.exe /c \"mvnw.cmd clean compile -q 2>&1\")",
+      "Bash(cmd.exe /c \"mvnw.cmd test -Dtest=ShiftSwapServiceTest 2>&1\")",
+      "Bash(cmd.exe /c \"mvnw.cmd test -Dtest=ShiftSwapServiceTest\")",
+      "Bash(cmd.exe /c \"mvnw.cmd test -Dtest=ShiftSwapServiceTest > test_output.txt 2>&1\")",
+      "Bash(cmd.exe /c \"mvnw.cmd test -Dtest=ShiftSwapServiceTest --batch-mode\" 2>&1)",
+      "Bash(cmd.exe /c \"mvnw.cmd test -Dtest=ShiftSwapServiceTest -Dsurefire.failIfNoSpecifiedTests=false 2>&1\")",
+      "Bash(cmd.exe /c \"mvnw.cmd compile -q\")",
+      "Bash(echo \"EXIT_CODE:$?\")",
+      "Bash(cmd.exe /c \"mvnw.cmd test -Dtest=ShiftSwapServiceTest -Dsurefire.failIfNoSpecifiedTests=false -Dsurefire.timeout=60\")",
+      "Bash(cmd.exe /c \"mvnw.cmd test -Dtest=ShiftSwapServiceTest -Dsurefire.failIfNoSpecifiedTests=false > D:\\\\ThiezDuAn\\\\PointTrack_BE\\\\mvn_test_result.txt 2>&1 & echo %ERRORLEVEL%\")"
     ]
   }
 }

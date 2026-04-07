@@ -21,9 +21,6 @@ public class ShiftRequest {
     @NotNull(message = "customerId không được để trống")
     Long customerId;
 
-    /** Tuỳ chọn – nếu dùng template thì start/end/duration/otMultiplier lấy từ template */
-    Long templateId;
-
     @NotNull(message = "shiftDate không được để trống")
     @JsonFormat(pattern = "yyyy-MM-dd")
     @Schema(type = "string", example = "2026-03-21")

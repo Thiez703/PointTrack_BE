@@ -44,11 +44,6 @@ public class Shift extends BaseEntity {
     @JoinColumn(name = "customer_id", nullable = false)
     Customer customer;
 
-    /** Ca mẫu (tuỳ chọn – nếu dùng từ template) */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "template_id")
-    ShiftTemplate template;
-
     /** Gói dịch vụ (tuỳ chọn – nếu ca thuộc gói) */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "package_id")

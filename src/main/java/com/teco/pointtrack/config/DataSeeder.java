@@ -30,9 +30,9 @@ public class DataSeeder implements CommandLineRunner {
     private final SalaryLevelRepository salaryLevelRepository;
     private final SystemSettingRepository systemSettingRepository;
     private final CustomerRepository customerRepository;
-    private final ShiftTemplateRepository shiftTemplateRepository;
     private final WorkScheduleRepository workScheduleRepository;
     private final PasswordEncoder passwordEncoder;
+    private final AttendanceRecordRepository attendanceRepository;
 
     @Override
     @Transactional
@@ -41,32 +41,22 @@ public class DataSeeder implements CommandLineRunner {
         seedRoles();
         seedSalaryLevels();
         seedSystemSettings();
-
-        // Khởi tạo Admin nhưng không gán ca làm việc
         seedAdminUser();
-
-        // Khởi tạo và lấy ra Employee để gán ca làm việc (Test App)
         User employee = seedEmployeeUser();
         seedWorkSchedule(employee);
         seedAttendanceRecords(employee);
     }
 
-    private final AttendanceRecordRepository attendanceRepository;
-
     private void seedAttendanceRecords(User employee) {
-        // Đảm bảo nhân viên có cấp bậc lương cao nhất để test (100k/h)
         if (employee.getSalaryLevel() == null || !employee.getSalaryLevel().getName().equals("Cấp 3")) {
             salaryLevelRepository.findByNameAndDeletedAtIsNull("Cấp 3").ifPresent(level -> {
                 employee.setSalaryLevel(level);
                 userRepository.save(employee);
-                log.info(">>>> ĐÃ GÁN LƯƠNG CẤP 3 CHO NHÂN VIÊN {}.", employee.getPhoneNumber());
             });
         }
 
-        // Tạo 2 ca làm việc đã hoàn tất cho 2 ngày trước (Hôm qua và Hôm kia)
         LocalDate today = LocalDate.now();
         Customer customer = customerRepository.findAll().get(0);
-        ShiftTemplate shiftTemplate = shiftTemplateRepository.findAll().get(0);
 
         for (int i = 1; i <= 2; i++) {
             LocalDate workDate = today.minusDays(i);
@@ -74,82 +64,50 @@ public class DataSeeder implements CommandLineRunner {
                 WorkSchedule schedule = WorkSchedule.builder()
                         .user(employee)
                         .customer(customer)
-                        .shiftTemplate(shiftTemplate)
                         .workDate(workDate)
-                        .scheduledStart(LocalDateTime.of(workDate, shiftTemplate.getDefaultStart()))
-                        .scheduledEnd(LocalDateTime.of(workDate, shiftTemplate.getDefaultEnd()))
-                        .status(WorkScheduleStatus.CONFIRMED) // Đã check-in
+                        .scheduledStart(LocalDateTime.of(workDate, LocalTime.of(8, 0)))
+                        .scheduledEnd(LocalDateTime.of(workDate, LocalTime.of(12, 0)))
+                        .status(WorkScheduleStatus.CONFIRMED)
                         .build();
                 workScheduleRepository.save(schedule);
 
-                // Tạo bản ghi chấm công đã hoàn tất
                 AttendanceRecord record = AttendanceRecord.builder()
                         .workSchedule(schedule)
                         .user(employee)
                         .checkInTime(schedule.getScheduledStart())
                         .checkOutTime(schedule.getScheduledEnd())
-                        .actualMinutes(240) // 4 tiếng
+                        .actualMinutes(240)
                         .otMultiplier(BigDecimal.valueOf(1.0))
                         .status(AttendanceStatus.ON_TIME)
                         .build();
                 attendanceRepository.save(record);
-
-                log.info(">>>> ĐÃ TẠO CHẤM CÔNG MẪU CHO NGÀY {}: 4 TIẾNG.", workDate);
             }
         }
     }
 
     private void seedWorkSchedule(User employee) {
-        // 1. Tìm hoặc tạo Khách hàng (Tránh duplicate khi chạy lại code)
         String customerPhone = "0901234567";
         Customer customer = customerRepository.findByPhoneAndDeletedAtIsNull(customerPhone)
-                .orElseGet(() -> {
-                    Customer newCustomer = Customer.builder()
-                            .name("Khách hàng Mẫu (Trung tâm Q1)")
-                            .address("72 Lê Thánh Tôn, Bến Nghé, Quận 1, TP.HCM")
-                            .phone(customerPhone)
-                            .latitude(10.7782)
-                            .longitude(106.7011)
-                            .status(CustomerStatus.ACTIVE)
-                            .build();
-                    return customerRepository.save(newCustomer);
-                });
+                .orElseGet(() -> customerRepository.save(Customer.builder()
+                        .name("Khách hàng Mẫu (Trung tâm Q1)")
+                        .address("72 Lê Thánh Tôn, Bến Nghé, Quận 1, TP.HCM")
+                        .phone(customerPhone)
+                        .latitude(10.7782)
+                        .longitude(106.7011)
+                        .status(CustomerStatus.ACTIVE)
+                        .build()));
 
-        // 2. Tìm hoặc tạo Ca mẫu (Sáng: 08:00 - 12:00)
-        String shiftName = "Ca Sáng (08:00 - 12:00)";
-        ShiftTemplate shift = shiftTemplateRepository.findByNameAndDeletedAtIsNull(shiftName)
-                .orElseGet(() -> {
-                    ShiftTemplate newShift = ShiftTemplate.builder()
-                            .name(shiftName)
-                            .defaultStart(LocalTime.of(8, 0))
-                            .defaultEnd(LocalTime.of(12, 0))
-                            .durationMinutes(240) // FIX LỖI SQL: 4 tiếng = 240 phút
-                            .shiftType(ShiftType.NORMAL)
-                            .otMultiplier(BigDecimal.valueOf(1.0))
-                            .isActive(true)
-                            .build();
-                    return shiftTemplateRepository.save(newShift);
-                });
-
-        // 3. Đảm bảo Employee này luôn có 1 ca làm việc vào NGÀY HÔM NAY để test Check-in
         LocalDate today = LocalDate.now();
-        boolean hasScheduleToday = workScheduleRepository.existsByUserIdAndWorkDate(employee.getId(), today);
-
-        if (!hasScheduleToday) {
+        if (!workScheduleRepository.existsByUserIdAndWorkDate(employee.getId(), today)) {
             WorkSchedule schedule = WorkSchedule.builder()
                     .user(employee)
                     .customer(customer)
-                    .shiftTemplate(shift)
                     .workDate(today)
-                    .scheduledStart(LocalDateTime.of(today, shift.getDefaultStart()))
-                    .scheduledEnd(LocalDateTime.of(today, shift.getDefaultEnd()))
+                    .scheduledStart(LocalDateTime.of(today, LocalTime.of(8, 0)))
+                    .scheduledEnd(LocalDateTime.of(today, LocalTime.of(12, 0)))
                     .status(WorkScheduleStatus.SCHEDULED)
                     .build();
             workScheduleRepository.save(schedule);
-
-            log.info(">>>> ĐÃ TẠO LỊCH LÀM VIỆC MẪU CHO NHÂN VIÊN ({}) VÀO HÔM NAY ({}).",
-                    employee.getPhoneNumber(), today);
-            log.info(">>>> Bạn có thể dùng workScheduleId = {} để test Check-in.", schedule.getId());
         }
     }
 
@@ -163,35 +121,27 @@ public class DataSeeder implements CommandLineRunner {
     private void seedRoles() {
         if (!roleRepository.existsBySlug("ADMIN")) {
             Set<Permission> adminPerms = new HashSet<>(permissionRepository.findAll());
-            Role adminRole = Role.builder()
+            roleRepository.save(Role.builder()
                     .slug("ADMIN")
                     .displayName("Quản trị viên")
                     .description("Toàn quyền hệ thống")
                     .isActive(true)
                     .isSystem(true)
                     .permissions(adminPerms)
-                    .build();
-            roleRepository.save(adminRole);
-            log.info("Seeded role: ADMIN");
+                    .build());
         }
-
         if (!roleRepository.existsBySlug("USER")) {
-            Role userRole = Role.builder()
+            roleRepository.save(Role.builder()
                     .slug("USER")
                     .displayName("Nhân viên")
                     .description("Nhân viên phục vụ tại nhà khách hàng")
                     .isActive(true)
                     .isSystem(true)
                     .permissions(new HashSet<>())
-                    .build();
-            roleRepository.save(userRole);
-            log.info("Seeded role: USER");
+                    .build());
         }
     }
 
-    /**
-     * Tự động tạo 3 cấp bậc lương mặc định
-     */
     private void seedSalaryLevels() {
         createSalaryLevelIfNotExists("Cấp 1", 50000, "Lương cơ bản 50.000 VNĐ/giờ");
         createSalaryLevelIfNotExists("Cấp 2", 70000, "Lương cơ bản 70.000 VNĐ/giờ");
@@ -200,30 +150,21 @@ public class DataSeeder implements CommandLineRunner {
 
     private void createSalaryLevelIfNotExists(String name, long amount, String description) {
         if (salaryLevelRepository.findByNameAndDeletedAtIsNull(name).isEmpty()) {
-            SalaryLevel level = SalaryLevel.builder()
+            salaryLevelRepository.save(SalaryLevel.builder()
                     .name(name)
                     .baseSalary(BigDecimal.valueOf(amount))
                     .description(description)
                     .isActive(true)
-                    .build();
-            salaryLevelRepository.save(level);
-            log.info("Seeded salary level: {} ({} VNĐ/h)", name, amount);
+                    .build());
         }
     }
 
     private void seedSystemSettings() {
-        createSettingIfNotExists("GRACE_PERIOD_MINUTES", "5",
-                "Số phút check-in muộn vẫn tính đúng giờ (BR-11)");
-        createSettingIfNotExists("TRAVEL_BUFFER_MINUTES", "15",
-                "Thời gian đệm di chuyển tối thiểu giữa 2 ca (BR-09)");
-        createSettingIfNotExists("PENALTY_RULES",
-                "[{\"minLateMinutes\":15,\"penaltyShift\":0.5},{\"minLateMinutes\":30,\"penaltyShift\":1.0}]",
-                "Bậc thang trừ công khi check-in muộn (BR-12)");
-        createSettingIfNotExists("GPS_RADIUS_METERS", "50",
-                "Bán kính GPS fencing cho phép check-in (meters) — BR-14");
-        createSettingIfNotExists("LATE_CHECKOUT_THRESHOLD_MINUTES", "30",
-                "Số phút checkout quá giờ kết thúc ca bắt buộc nhập lý do — BR-16.2");
-        log.info("Seeded system settings");
+        createSettingIfNotExists("GRACE_PERIOD_MINUTES", "5", "BR-11");
+        createSettingIfNotExists("TRAVEL_BUFFER_MINUTES", "15", "BR-09");
+        createSettingIfNotExists("PENALTY_RULES", "[]", "BR-12");
+        createSettingIfNotExists("GPS_RADIUS_METERS", "50", "BR-14");
+        createSettingIfNotExists("LATE_CHECKOUT_THRESHOLD_MINUTES", "30", "BR-16.2");
     }
 
     private void createSettingIfNotExists(String key, String value, String description) {
@@ -237,75 +178,53 @@ public class DataSeeder implements CommandLineRunner {
     }
 
     private User seedAdminUser() {
-        String adminPhone = "0987654321";
+        String adminPhone = "0900000000";
+        String adminEmail = "admin@pointtrack.com";
         var existing = userRepository.findByPhoneNumberAndDeletedAtIsNull(adminPhone);
-        if (existing.isPresent()) {
-            return existing.get();
-        }
+        if (existing.isPresent()) return existing.get();
+        var existingByEmail = userRepository.findByEmail(adminEmail);
+        if (existingByEmail.isPresent()) return existingByEmail.get();
 
-        Role adminRole = roleRepository.findBySlug("ADMIN")
-                .orElseThrow(() -> new RuntimeException("Role ADMIN not found"));
-
-        User admin = User.builder()
+        Role adminRole = roleRepository.findBySlug("ADMIN").orElseThrow();
+        return userRepository.save(User.builder()
                 .fullName("PointTrack Admin")
                 .phoneNumber(adminPhone)
                 .email("admin@pointtrack.com")
-                .passwordHash(passwordEncoder.encode("123456"))
+                .passwordHash(passwordEncoder.encode("Admin@123"))
                 .status(UserStatus.ACTIVE)
                 .isFirstLogin(false)
                 .role(adminRole)
-                .build();
-
-        User saved = userRepository.save(admin);
-        log.info("Seeded admin user: {} / 123456", adminPhone);
-        return saved;
+                .build());
     }
 
-    // Đổi kiểu trả về thành User để lấy dữ liệu gán vào hàm tạo Ca
     private User seedEmployeeUser() {
         String employeePhone = "0123456789";
-        String tempPassword   = "Test@1234";   // satisfies BR-05: 8+ chars, uppercase, digit
-
+        String employeeEmail = "employee@pointtrack.com";
         var existing = userRepository.findByPhoneNumberAndDeletedAtIsNull(employeePhone);
-        if (existing.isPresent()) {
-            User emp = existing.get();
-            // Reset về trạng thái chưa đổi mật khẩu lần đầu để test flow first-change
-            if (!emp.isFirstLogin()) {
-                emp.setFirstLogin(true);
-                emp.setPasswordHash(passwordEncoder.encode(tempPassword));
-                userRepository.save(emp);
-                log.info(">>>> RESET employee {} → isFirstLogin=true, temp password: {}", employeePhone, tempPassword);
-            }
-            return emp;
-        }
+        if (existing.isPresent()) return existing.get();
+        var existingByEmail = userRepository.findByEmail(employeeEmail);
+        if (existingByEmail.isPresent()) return existingByEmail.get();
 
-        Role userRole = roleRepository.findBySlug("USER")
-                .orElseThrow(() -> new RuntimeException("Role USER not found"));
-
-        User employee = User.builder()
+        Role userRole = roleRepository.findBySlug("USER").orElseThrow();
+        return userRepository.save(User.builder()
                 .fullName("Employee Test")
                 .phoneNumber(employeePhone)
                 .email("employee@pointtrack.com")
-                .passwordHash(passwordEncoder.encode(tempPassword))
+                .passwordHash(passwordEncoder.encode("Test@1234"))
                 .status(UserStatus.ACTIVE)
                 .isFirstLogin(true)
                 .role(userRole)
-                .build();
-
-        User saved = userRepository.save(employee);
-        log.info("Seeded employee user: {} / {} (isFirstLogin=true)", employeePhone, tempPassword);
-        return saved;
+                .build());
     }
 
     private void createPermissionIfNotExists(String code, String name) {
         if (permissionRepository.findByCode(code).isEmpty()) {
-            Permission permission = Permission.builder()
+            permissionRepository.save(Permission.builder()
                     .code(code)
                     .name(name)
                     .groupName(PermissionGroup.ADMINISTRATION)
                     .type(PermissionType.ACTION)
-                    .build();
-            permissionRepository.save(permission);
+                    .build());
         }
     }
 }

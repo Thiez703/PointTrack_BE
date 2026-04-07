@@ -37,7 +37,7 @@ import org.springframework.web.bind.annotation.*;
  *   PUT    /api/v1/auth/profile               FR-07 – Sửa hồ sơ
  */
 @RestController
-@RequestMapping("/v1/auth")
+@RequestMapping("/auth")
 @RequiredArgsConstructor
 @Tag(name = "Authentication", description = "Xác thực & Quản lý tài khoản")
 public class AuthController {

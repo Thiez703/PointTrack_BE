@@ -32,11 +32,6 @@ public class WorkSchedule extends BaseEntity {
     @JoinColumn(name = "user_id", nullable = false)
     User user;
 
-    /** Ca mẫu (Optional nếu nhập tay từ FE) */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "shift_template_id")
-    ShiftTemplate shiftTemplate;
-
     /** Địa điểm làm việc (Optional nếu nhập tay từ FE) */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "customer_id")

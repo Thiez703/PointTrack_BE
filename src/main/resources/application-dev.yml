@@ -4,7 +4,7 @@ spring:
 
   # DATABASE (MySQL)
   datasource:
-    url: jdbc:mysql://localhost:3307/pointtrack_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://localhost:3306/pointtrack_db?useSSL=false&serverTimezone=Asia%2FHo_Chi_Minh&allowPublicKeyRetrieval=true
     username: root
     password: ${SPRING_DATASOURCE_PASSWORD:123456}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -18,6 +18,8 @@ spring:
       hibernate:
         format_sql: true
         dialect: org.hibernate.dialect.MySQLDialect
+        jdbc:
+          time_zone: Asia/Ho_Chi_Minh
 
   # REDIS (for JWT revocation)
   data:
@@ -75,5 +77,5 @@ app:
   shift:
     geofence-radius-meters: ${GEOFENCE_RADIUS_METERS:100}
   cookie:
-    secure: true
-    same-site: None
+    secure: false
+    same-site: Lax

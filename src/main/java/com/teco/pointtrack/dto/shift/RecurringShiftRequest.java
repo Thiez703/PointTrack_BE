@@ -28,8 +28,6 @@ public class RecurringShiftRequest {
     @NotNull(message = "customerId không được để trống")
     Long customerId;
 
-    Long templateId;
-
     @NotNull(message = "startDate không được để trống")
     @JsonFormat(pattern = "yyyy-MM-dd")
     @Schema(type = "string", example = "2026-04-01")

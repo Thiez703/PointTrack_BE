@@ -3,7 +3,6 @@ package com.teco.pointtrack.service;
 import com.teco.pointtrack.dto.shift.ConflictCheckResponse;
 import com.teco.pointtrack.entity.Customer;
 import com.teco.pointtrack.entity.Shift;
-import com.teco.pointtrack.entity.ShiftTemplate;
 import com.teco.pointtrack.entity.User;
 import com.teco.pointtrack.entity.enums.ShiftStatus;
 import com.teco.pointtrack.entity.enums.ShiftType;

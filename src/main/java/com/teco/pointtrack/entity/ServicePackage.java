@@ -37,10 +37,6 @@ public class ServicePackage extends BaseEntity {
     @JoinColumn(name = "employee_id", nullable = false)
     User employee;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "template_id")
-    ShiftTemplate template;
-
     // ── Sessions ──────────────────────────────────────────────────────────────
 
     @Column(name = "total_sessions", nullable = false)

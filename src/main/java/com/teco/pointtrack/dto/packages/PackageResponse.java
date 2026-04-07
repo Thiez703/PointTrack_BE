@@ -22,9 +22,6 @@ public class PackageResponse {
     Long employeeId;
     String employeeName;
 
-    Long templateId;
-    String templateName;
-
     Integer totalSessions;
     Integer completedSessions;
     Integer remainingSessions;

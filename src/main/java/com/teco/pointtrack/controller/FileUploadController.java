@@ -19,7 +19,7 @@ import java.util.Map;
  * FE upload trước → nhận URL → đính kèm vào request tạo/cập nhật.
  */
 @RestController
-@RequestMapping("/v1/files")
+@RequestMapping("/files")
 @RequiredArgsConstructor
 @Slf4j
 @Tag(name = "File Upload", description = "Upload file lên server")

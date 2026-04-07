@@ -31,10 +31,6 @@ public class ShiftResponse {
     Double customerLongitude;
     String customerAddress;
 
-    // template (nullable)
-    Long   templateId;
-    String templateName;
-
     // package (nullable)
     Long packageId;
 

@@ -37,7 +37,8 @@ public class UserDetail implements Serializable {
     Long salaryLevelId;
     String salaryLevelName;
     SalaryLevelResponse salaryLevel;
-    
+
+    LocalDateTime passwordChangedAt;
     LocalDateTime createdAt;
     LocalDateTime updatedAt;
 }

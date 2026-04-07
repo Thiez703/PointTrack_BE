@@ -81,10 +81,6 @@ public interface ShiftRepository extends JpaRepository<Shift, Long> {
             """)
     List<Long> findBusyEmployeeIdsByDate(@Param("shiftDate") LocalDate shiftDate);
 
-    // ── Template usage check (BR TEMPLATE_IN_USE) ─────────────────────────────
-
-    boolean existsByTemplateIdAndStatusNot(Long templateId, ShiftStatus status);
-
     // ── Package-related ───────────────────────────────────────────────────────
 
     List<Shift> findAllByServicePackageIdOrderByShiftDateAsc(Long packageId);
@@ -178,6 +174,34 @@ public interface ShiftRepository extends JpaRepository<Shift, Long> {
             ORDER BY s.shiftDate ASC, s.startTime ASC
             """)
     List<Shift> findOpenShifts(@Param("today") LocalDate today);
+
+    @Query("""
+            SELECT s FROM Shift s
+            WHERE s.status IN (
+                  com.teco.pointtrack.entity.enums.ShiftStatus.ASSIGNED,
+                  com.teco.pointtrack.entity.enums.ShiftStatus.SCHEDULED,
+                  com.teco.pointtrack.entity.enums.ShiftStatus.CONFIRMED
+              )
+              AND s.shiftDate = :today
+              AND s.startTime < :thresholdTime
+            """)
+    List<Shift> findPendingMissedShifts(
+            @Param("today")         LocalDate today,
+            @Param("thresholdTime") java.time.LocalTime thresholdTime);
+
+    @Query("""
+            SELECT s FROM Shift s
+            WHERE s.status = com.teco.pointtrack.entity.enums.ShiftStatus.IN_PROGRESS
+              AND (
+                  (s.endTime > s.startTime AND s.shiftDate = :today AND s.endTime < :thresholdTime)
+                  OR
+                  (s.endTime < s.startTime AND s.shiftDate = :yesterday AND s.endTime < :thresholdTime)
+              )
+            """)
+    List<Shift> findPendingMissingOutShifts(
+            @Param("today")         LocalDate today,
+            @Param("yesterday")     LocalDate yesterday,
+            @Param("thresholdTime") java.time.LocalTime thresholdTime);
 
     // ── My today shifts ───────────────────────────────────────────────────────
 

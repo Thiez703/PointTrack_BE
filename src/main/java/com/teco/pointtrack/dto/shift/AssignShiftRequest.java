@@ -32,15 +32,14 @@ public class AssignShiftRequest {
     @Schema(type = "string", example = "2026-03-25")
     LocalDate shiftDate;
 
-    @Schema(description = "ID ca mẫu (tùy chọn). Nếu có, startTime/endTime lấy từ template.")
-    Long templateId;
-
+    @NotNull(message = "startTime không được để trống")
     @JsonFormat(pattern = "HH:mm")
-    @Schema(type = "string", example = "08:00", description = "Bắt buộc nếu không dùng templateId")
+    @Schema(type = "string", example = "08:00")
     LocalTime startTime;
 
+    @NotNull(message = "endTime không được để trống")
     @JsonFormat(pattern = "HH:mm")
-    @Schema(type = "string", example = "12:00", description = "Bắt buộc nếu không dùng templateId")
+    @Schema(type = "string", example = "12:00")
     LocalTime endTime;
 
     @NotNull(message = "shiftType không được để trống")

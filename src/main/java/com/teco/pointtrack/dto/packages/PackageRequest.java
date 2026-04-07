@@ -19,9 +19,14 @@ public class PackageRequest {
     @NotNull(message = "employeeId không được để trống")
     Long employeeId;
 
-    /** Ca mẫu dùng cho mỗi buổi (start/end/duration/otMultiplier lấy từ template) */
-    @NotNull(message = "templateId không được để trống")
-    Long templateId;
+    @NotNull(message = "endTime không được để trống")
+    String endTime;
+
+    @NotNull(message = "shiftType không được để trống")
+    com.teco.pointtrack.entity.enums.ShiftType shiftType;
+
+    @NotNull(message = "otMultiplier không được để trống")
+    java.math.BigDecimal otMultiplier;
 
     @NotNull
     @Min(value = 1, message = "Tổng buổi phải >= 1")

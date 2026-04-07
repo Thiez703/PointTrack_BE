@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/v1/shifts")
+@RequestMapping("/shifts")
 @RequiredArgsConstructor
 @Tag(name = "Shift", description = "Quản lý ca làm việc – BR-06, BR-09, BR-10, BR-13")
 public class ShiftController {
@@ -214,6 +214,22 @@ public class ShiftController {
     public ResponseEntity<ApiResponse<Void>> cancel(@PathVariable Long id) {
         shiftService.cancel(id);
         return ResponseEntity.ok(ApiResponse.success(null, "Huỷ ca thành công"));
+    }
+
+    @DeleteMapping("/{id}/assign")
+    @Operation(summary = "Gỡ nhân viên khỏi ca (chuyển về ca trống PUBLISHED)")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Void>> unassignEmployee(@PathVariable Long id) {
+        shiftService.unassignEmployee(id);
+        return ResponseEntity.ok(ApiResponse.success(null, "Gỡ nhân viên khỏi ca thành công"));
+    }
+
+    @DeleteMapping("/{id}/hard")
+    @Operation(summary = "Xóa vĩnh viễn ca làm việc (ADMIN)")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Void>> hardDelete(@PathVariable Long id) {
+        shiftService.hardDelete(id);
+        return ResponseEntity.ok(ApiResponse.success(null, "Xóa ca thành công"));
     }
 
     // ─────────────────────────────────────────────────────────────────────────

@@ -68,6 +68,18 @@ public class JwtUtils {
         Claims payload = parseClaimsFromToken(token);
         String username = payload.getSubject();
         CustomUserDetail customUserDetail = (CustomUserDetail) userDetailsService.loadUserByUsername(username);
+
+        // Invalidate token nếu mật khẩu đã đổi sau khi token được cấp
+        if (customUserDetail.getUserDetail().getPasswordChangedAt() != null) {
+            long changedAt = java.sql.Timestamp.valueOf(customUserDetail.getUserDetail().getPasswordChangedAt()).getTime();
+            long issuedAt = payload.getIssuedAt().getTime();
+
+            // Cho phép sai số 1 giây để tránh lỗi làm tròn thời gian
+            if (issuedAt < (changedAt - 1000)) {
+                throw new CustomAuthenticationException("Mật khẩu đã được thay đổi. Vui lòng đăng nhập lại.");
+            }
+        }
+
         return new UsernamePasswordAuthenticationToken(customUserDetail, "", customUserDetail.getAuthorities());
     }
 

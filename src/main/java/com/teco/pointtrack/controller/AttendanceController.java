@@ -24,7 +24,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.time.LocalDate;
 
 @RestController
-@RequestMapping("/v1/attendance")
+@RequestMapping("/attendance")
 @RequiredArgsConstructor
 @SecurityRequirement(name = "bearerAuth")
 @Tag(name = "Attendance", description = "Chấm công — Check-in/Check-out & Giải trình")
@@ -182,5 +182,62 @@ public class AttendanceController {
         Long adminId = AuthUtils.getUserDetail().getId();
         attendanceService.adminUpdateAttendance(recordId, req, adminId);
         return ResponseEntity.ok(new MessageResponse("Cập nhật giờ công thành công. Audit log đã được ghi."));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Admin: Lịch sử chấm công (New APIs)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Operation(summary = "[Admin] Danh sách lịch sử chấm công (có filter + summary)")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    @GetMapping("/history")
+    public ResponseEntity<ApiResponse<AttendanceHistoryPageResponse>> getHistory(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int limit,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) Long locationId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateTo,
+            @RequestParam(required = false) String shiftType) {
+
+        // BE xử lý 0-based
+        AttendanceHistoryPageResponse data = attendanceService.getAttendanceHistory(
+                page - 1, limit, search, locationId, status, dateFrom, dateTo, shiftType);
+        return ResponseEntity.ok(ApiResponse.success(data, "Lấy lịch sử chấm công thành công"));
+    }
+
+    @Operation(summary = "[Admin] Dropdown danh sách địa điểm")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    @GetMapping("/locations")
+    public ResponseEntity<ApiResponse<java.util.List<LocationDropdownResponse>>> getLocations() {
+        java.util.List<LocationDropdownResponse> data = attendanceService.getLocations();
+        return ResponseEntity.ok(ApiResponse.success(data, "Lấy danh sách địa điểm thành công"));
+    }
+
+    @Operation(summary = "[Admin] Cập nhật ghi chú bản ghi chấm công")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    @PatchMapping("/{id}/note")
+    public ResponseEntity<ApiResponse<AttendanceHistoryResponse>> updateNote(
+            @PathVariable Long id,
+            @Valid @RequestBody UpdateNoteRequest req) {
+
+        AttendanceHistoryResponse result = attendanceService.updateAttendanceNote(id, req.getNote());
+        return ResponseEntity.ok(ApiResponse.success(result, "Cập nhật ghi chú thành công"));
+    }
+
+    @Operation(summary = "[Admin] Xuất Excel lịch sử chấm công")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    @PostMapping("/export")
+    public void exportToExcel(
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) Long locationId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateTo,
+            @RequestParam(required = false) String shiftType,
+            jakarta.servlet.http.HttpServletResponse response) throws java.io.IOException {
+
+        attendanceService.exportAttendanceToExcel(search, locationId, status, dateFrom, dateTo, shiftType, response);
     }
 }
