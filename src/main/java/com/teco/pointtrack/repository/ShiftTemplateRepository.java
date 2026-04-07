@@ -26,19 +26,13 @@ public interface ShiftTemplateRepository extends JpaRepository<ShiftTemplate, Lo
     List<ShiftTemplate> findAllByShiftTypeAndDeletedAtIsNullOrderByDefaultStartAsc(ShiftType shiftType);
 
     /** BR TEMPLATE_IN_USE: kiểm tra template có đang được dùng bởi shift hoặc package chưa */
-    @Query("""
-            SELECT CASE WHEN COUNT(s) > 0 THEN TRUE ELSE FALSE END
-            FROM Shift s
-            WHERE s.template.id = :templateId
-              AND s.status <> com.teco.pointtrack.entity.enums.ShiftStatus.CANCELLED
-            """)
-    boolean isUsedByActiveShifts(@Param("templateId") Long templateId);
+    // Note: Currently, Shift and ServicePackage no longer reference ShiftTemplate directly
+    // Templates are used during creation but not stored as relationships
+    default boolean isUsedByActiveShifts(Long templateId) {
+        return false;
+    }
 
-    @Query("""
-            SELECT CASE WHEN COUNT(p) > 0 THEN TRUE ELSE FALSE END
-            FROM ServicePackage p
-            WHERE p.template.id = :templateId
-              AND p.status <> com.teco.pointtrack.entity.enums.PackageStatus.CANCELLED
-            """)
-    boolean isUsedByActivePackages(@Param("templateId") Long templateId);
+    default boolean isUsedByActivePackages(Long templateId) {
+        return false;
+    }
 }

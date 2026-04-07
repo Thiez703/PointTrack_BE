@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
@@ -17,13 +19,15 @@ import java.util.List;
 @RequiredArgsConstructor
 public class CaptchaService {
 
+    private static final Logger log = LoggerFactory.getLogger(CaptchaService.class);
+
     @Value("${app.turnstile.secret-key}")
     private String secretKey;
 
     @Value("${app.turnstile.url}")
     private String verifyUrl;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
 
     public boolean verifyCaptcha(String token, HttpServletRequest servletRequest) {
 
@@ -31,7 +35,7 @@ public class CaptchaService {
         // BYPASS TRÊN LOCAL / TEST (DC-15)
         // Nếu dùng key test của Cloudflare hoặc token đặc biệt thì cho qua
         // ─────────────────────────────────────────────────────────────────────────────
-        if (secretKey.trim().startsWith("1x000") || "bypass-local".equals(token)) {
+        if (secretKey != null && secretKey.trim().startsWith("1x000") || "bypass-local".equals(token)) {
             return true;
         }
 
@@ -42,7 +46,7 @@ public class CaptchaService {
         String clientIp = getClientIp(servletRequest);
 
         MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
-        body.add("secret", secretKey.trim());
+        body.add("secret", secretKey != null ? secretKey.trim() : "");
         body.add("response", token);
         body.add("remoteip", clientIp);
 
@@ -55,6 +59,7 @@ public class CaptchaService {
         try {
             response = restTemplate.postForObject(verifyUrl, request, TurnstileResponse.class);
         } catch (Exception e) {
+            log.error("Captcha verification failed: {}", e.getMessage(), e);
             return false;
         }
 

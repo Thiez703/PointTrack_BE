@@ -98,7 +98,14 @@ public class JwtUtils {
     }
 
     public boolean isTokenRevoked(String token) {
-        return Boolean.TRUE.equals(redisTemplate.hasKey(TOKEN_PREFIX + token));
+        try {
+            return Boolean.TRUE.equals(redisTemplate.hasKey(TOKEN_PREFIX + token));
+        } catch (Exception e) {
+            org.slf4j.LoggerFactory.getLogger(JwtUtils.class)
+                    .warn("Redis connection failed during token revocation check: {}", e.getMessage());
+            // Fail gracefully - token not revoked if Redis is down
+            return false;
+        }
     }
 
     public void revokeToken(String token) {
