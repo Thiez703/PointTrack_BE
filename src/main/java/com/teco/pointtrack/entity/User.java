@@ -128,7 +128,7 @@ public class User extends BaseEntity {
 
     // ── Relations ─────────────────────────────────────────────────────────────
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "role_id")
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
@@ -137,7 +137,7 @@ public class User extends BaseEntity {
 
     // ── Salary Level ────────────────────────────────────────────────────────────
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "salary_level_id")
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
