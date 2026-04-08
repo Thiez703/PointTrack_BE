@@ -19,6 +19,8 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
 
     Optional<AttendanceRecord> findByWorkScheduleId(Long workScheduleId);
 
+        List<AttendanceRecord> findByWorkScheduleIdIn(List<Long> workScheduleIds);
+
     boolean existsByWorkScheduleId(Long workScheduleId);
 
     // ── Employee stats ────────────────────────────────────────────────────────

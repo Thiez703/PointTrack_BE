@@ -2,8 +2,10 @@ package com.teco.pointtrack.dto.attendance;
 
 import lombok.*;
 import lombok.experimental.FieldDefaults;
+import com.teco.pointtrack.entity.enums.WorkScheduleStatus;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 
 @Data
@@ -21,4 +23,13 @@ public class WorkScheduleResponse {
     String address;
     Double lat;
     Double lng;
+    WorkScheduleStatus status;
+    String customerName;
+    String customerAddress;
+    Double customerLatitude;
+    Double customerLongitude;
+    String note;
+    Long attendanceRecordId;
+    LocalDateTime checkInTime;
+    LocalDateTime checkOutTime;
 }

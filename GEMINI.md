@@ -4,7 +4,7 @@ PointTrack is a specialized backend system designed for home service businesses 
 
 ## Project Overview
 
-- **Main Technologies:** Java 21, Spring Boot 3.5.5, MySQL 8, Redis, JJWT (0.12.5), Spring Data JPA, Hibernate.
+- **Main Technologies:** Java 25, Spring Boot 3.5.5, MySQL 8, Redis, JJWT (0.12.5), Spring Data JPA, Hibernate.
 - **Architecture:** Standard N-tier architecture:
     - `controller/`: REST API endpoints.
     - `service/`: Business logic.
@@ -21,7 +21,7 @@ PointTrack is a specialized backend system designed for home service businesses 
 ## Building and Running
 
 ### Environment Requirements
-- JDK 21
+- JDK 25
 - Docker Desktop (for MySQL and Redis)
 - Maven 3.9+ (or use the provided `./mvnw`)
 

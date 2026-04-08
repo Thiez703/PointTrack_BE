@@ -2,10 +2,12 @@ package com.teco.pointtrack.service;
 
 import com.teco.pointtrack.dto.shift.*;
 import com.teco.pointtrack.entity.*;
+import com.teco.pointtrack.entity.enums.AttendanceStatus;
 import com.teco.pointtrack.entity.enums.CustomerStatus;
 import com.teco.pointtrack.entity.enums.ShiftStatus;
 import com.teco.pointtrack.entity.enums.ShiftType;
 import com.teco.pointtrack.entity.enums.UserStatus;
+import com.teco.pointtrack.entity.enums.WorkScheduleStatus;
 import com.teco.pointtrack.exception.BadRequestException;
 import com.teco.pointtrack.exception.ConflictException;
 import com.teco.pointtrack.exception.NotFoundException;
@@ -36,6 +38,8 @@ public class ShiftService {
     private final UserRepository          userRepository;
     private final CustomerRepository      customerRepository;
     private final ConflictCheckerService  conflictChecker;
+    private final WorkScheduleRepository  workScheduleRepository;
+    private final AttendanceRecordRepository attendanceRecordRepository;
 
     @Value("${app.shift.geofence-radius-meters:100}")
     private double geofenceRadiusMeters;
@@ -794,6 +798,7 @@ public class ShiftService {
         shift.setCheckInPhoto(request.getPhotoUrl());
         shift.setStatus(ShiftStatus.IN_PROGRESS);
         shiftRepository.save(shift);
+        syncAttendanceFromShiftCheckIn(shift);
         return CheckInResponse.builder()
                 .withinGeofence(withinGeofence)
                 .distanceMeters(distance)
@@ -828,6 +833,7 @@ public class ShiftService {
         shift.setActualMinutes(actualMinutes);
         shift.setStatus(ShiftStatus.COMPLETED);
         shiftRepository.save(shift);
+        syncAttendanceFromShiftCheckOut(shift);
         return CheckInResponse.builder()
                 .withinGeofence(shift.getCustomer().getLatitude() == null || distance <= geofenceRadiusMeters)
                 .distanceMeters(distance)
@@ -849,5 +855,136 @@ public class ShiftService {
         double dLng = Math.toRadians(lng2 - lng1);
         double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    private void syncAttendanceFromShiftCheckIn(Shift shift) {
+        WorkSchedule workSchedule = findOrCreateWorkScheduleFromShift(shift);
+        workSchedule.setStatus(WorkScheduleStatus.IN_PROGRESS);
+        workScheduleRepository.save(workSchedule);
+
+        AttendanceRecord record = attendanceRecordRepository.findByWorkScheduleId(workSchedule.getId())
+                .orElseGet(() -> AttendanceRecord.builder()
+                        .workSchedule(workSchedule)
+                        .user(shift.getEmployee())
+                        .status(AttendanceStatus.ON_TIME)
+                        .lateMinutes(0)
+                        .earlyLeaveMinutes(0)
+                        .otMultiplier(shift.getOtMultiplier() != null ? shift.getOtMultiplier() : java.math.BigDecimal.ONE)
+                        .note(shift.getNotes())
+                        .build());
+
+        record.setCheckInTime(shift.getCheckInTime());
+        record.setCheckInLat(shift.getCheckInLat());
+        record.setCheckInLng(shift.getCheckInLng());
+        record.setCheckInDistanceMeters(shift.getCheckInDistanceMeters());
+        if (record.getStatus() == null) {
+            record.setStatus(AttendanceStatus.ON_TIME);
+        }
+
+        attendanceRecordRepository.save(record);
+    }
+
+    private void syncAttendanceFromShiftCheckOut(Shift shift) {
+        WorkSchedule workSchedule = findOrCreateWorkScheduleFromShift(shift);
+        workSchedule.setStatus(WorkScheduleStatus.COMPLETED);
+        workScheduleRepository.save(workSchedule);
+
+        AttendanceRecord record = attendanceRecordRepository.findByWorkScheduleId(workSchedule.getId())
+                .orElseGet(() -> AttendanceRecord.builder()
+                        .workSchedule(workSchedule)
+                        .user(shift.getEmployee())
+                        .status(AttendanceStatus.ON_TIME)
+                        .lateMinutes(0)
+                        .earlyLeaveMinutes(0)
+                        .otMultiplier(shift.getOtMultiplier() != null ? shift.getOtMultiplier() : java.math.BigDecimal.ONE)
+                        .note(shift.getNotes())
+                        .build());
+
+        if (record.getCheckInTime() == null) {
+            record.setCheckInTime(shift.getCheckInTime());
+            record.setCheckInLat(shift.getCheckInLat());
+            record.setCheckInLng(shift.getCheckInLng());
+            record.setCheckInDistanceMeters(shift.getCheckInDistanceMeters());
+        }
+
+        record.setCheckOutTime(shift.getCheckOutTime());
+        record.setCheckOutLat(shift.getCheckOutLat());
+        record.setCheckOutLng(shift.getCheckOutLng());
+        record.setCheckOutDistanceMeters(shift.getCheckOutDistanceMeters());
+        record.setActualMinutes(shift.getActualMinutes());
+
+        if (shift.getActualMinutes() != null) {
+            long workedMinutes = Math.max(0, shift.getActualMinutes());
+            record.setWorkedMinutes(workedMinutes);
+            record.setWorkedHours(java.math.BigDecimal.valueOf(workedMinutes)
+                    .divide(java.math.BigDecimal.valueOf(60), 2, java.math.RoundingMode.HALF_UP)
+                    .doubleValue());
+        }
+
+        if (record.getStatus() == null) {
+            record.setStatus(AttendanceStatus.ON_TIME);
+        }
+
+        attendanceRecordRepository.save(record);
+    }
+
+    private WorkSchedule findOrCreateWorkScheduleFromShift(Shift shift) {
+        if (shift.getEmployee() == null) {
+            throw new BadRequestException("Ca chưa có nhân viên, không thể đồng bộ chấm công");
+        }
+
+        Optional<WorkSchedule> existing = workScheduleRepository
+                .findByUserIdAndWorkDateAndStartTimeAndEndTimeAndDeletedAtIsNull(
+                        shift.getEmployee().getId(),
+                        shift.getShiftDate(),
+                        shift.getStartTime(),
+                        shift.getEndTime());
+
+        if (existing.isPresent()) {
+            WorkSchedule ws = existing.get();
+            ws.setCustomer(shift.getCustomer());
+            ws.setAddress(shift.getCustomer() != null ? shift.getCustomer().getAddress() : ws.getAddress());
+            ws.setLatitude(shift.getCustomer() != null ? shift.getCustomer().getLatitude() : ws.getLatitude());
+            ws.setLongitude(shift.getCustomer() != null ? shift.getCustomer().getLongitude() : ws.getLongitude());
+            ws.setStatus(mapShiftStatusToWorkScheduleStatus(shift.getStatus()));
+            ws.setNote(shift.getNotes());
+            return workScheduleRepository.save(ws);
+        }
+
+        LocalDateTime scheduledStart = LocalDateTime.of(shift.getShiftDate(), shift.getStartTime());
+        LocalDateTime scheduledEnd = LocalDateTime.of(shift.getShiftDate(), shift.getEndTime());
+        if (!scheduledEnd.isAfter(scheduledStart)) {
+            scheduledEnd = scheduledEnd.plusDays(1);
+        }
+
+        WorkSchedule newSchedule = WorkSchedule.builder()
+                .user(shift.getEmployee())
+                .customer(shift.getCustomer())
+                .workDate(shift.getShiftDate())
+                .startTime(shift.getStartTime())
+                .endTime(shift.getEndTime())
+                .address(shift.getCustomer() != null ? shift.getCustomer().getAddress() : null)
+                .latitude(shift.getCustomer() != null ? shift.getCustomer().getLatitude() : null)
+                .longitude(shift.getCustomer() != null ? shift.getCustomer().getLongitude() : null)
+                .scheduledStart(scheduledStart)
+                .scheduledEnd(scheduledEnd)
+                .status(mapShiftStatusToWorkScheduleStatus(shift.getStatus()))
+                .note(shift.getNotes())
+                .build();
+
+        return workScheduleRepository.save(newSchedule);
+    }
+
+    private WorkScheduleStatus mapShiftStatusToWorkScheduleStatus(ShiftStatus shiftStatus) {
+        if (shiftStatus == null) {
+            return WorkScheduleStatus.SCHEDULED;
+        }
+        return switch (shiftStatus) {
+            case IN_PROGRESS -> WorkScheduleStatus.IN_PROGRESS;
+            case COMPLETED, MISSING_OUT, MISSED -> WorkScheduleStatus.COMPLETED;
+            case CANCELLED -> WorkScheduleStatus.CANCELLED;
+            case CONFIRMED -> WorkScheduleStatus.CONFIRMED;
+            default -> WorkScheduleStatus.SCHEDULED;
+        };
     }
 }

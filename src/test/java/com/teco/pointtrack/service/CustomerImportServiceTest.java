@@ -15,7 +15,6 @@ import java.util.HashSet;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class CustomerImportServiceTest {
@@ -37,8 +36,6 @@ class CustomerImportServiceTest {
     @Test
     @DisplayName("validateRow: dòng hợp lệ → trả về null")
     void validateRow_valid_returnsNull() {
-        when(customerRepository.existsByPhoneAndDeletedAtIsNull("0901234567")).thenReturn(false);
-
         String result = service.validateRow(buildRow("0901234567", "123 Test, Q1, TPHCM"), seenPhones);
 
         assertThat(result).isNull();
@@ -97,14 +94,13 @@ class CustomerImportServiceTest {
     }
 
     @Test
-    @DisplayName("validateRow: SĐT đã tồn tại trong DB → lỗi")
-    void validateRow_phoneDuplicateInDb_returnsError() {
-        when(customerRepository.existsByPhoneAndDeletedAtIsNull("0901234567")).thenReturn(true);
+    @DisplayName("validateRow: SĐT đã tồn tại trong DB → vẫn hợp lệ để update")
+    void validateRow_phoneDuplicateInDb_returnsNull() {
         CustomerImportRow row = buildRow("0901234567", "123 Test");
 
         String result = service.validateRow(row, seenPhones);
 
-        assertThat(result).containsIgnoringCase("tồn tại");
+        assertThat(result).isNull();
     }
 
     @Test

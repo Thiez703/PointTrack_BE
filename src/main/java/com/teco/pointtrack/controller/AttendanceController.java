@@ -1,7 +1,19 @@
 package com.teco.pointtrack.controller;
 
 import com.teco.pointtrack.common.AuthUtils;
-import com.teco.pointtrack.dto.attendance.*;
+import com.teco.pointtrack.dto.attendance.AdminUpdateAttendanceRequest;
+import com.teco.pointtrack.dto.attendance.ApprovalRequest;
+import com.teco.pointtrack.dto.attendance.AttendanceHistoryPageResponse;
+import com.teco.pointtrack.dto.attendance.AttendanceHistoryResponse;
+import com.teco.pointtrack.dto.attendance.AttendanceRecordResponse;
+import com.teco.pointtrack.dto.attendance.CheckInRequest;
+import com.teco.pointtrack.dto.attendance.CheckInResponse;
+import com.teco.pointtrack.dto.attendance.CheckOutRequest;
+import com.teco.pointtrack.dto.attendance.CheckOutResponse;
+import com.teco.pointtrack.dto.attendance.ExplanationRequestResponse;
+import com.teco.pointtrack.dto.attendance.LocationDropdownResponse;
+import com.teco.pointtrack.dto.attendance.UpdateNoteRequest;
+import com.teco.pointtrack.dto.attendance.WorkScheduleResponse;
 import com.teco.pointtrack.dto.common.ApiResponse;
 import com.teco.pointtrack.dto.common.MessageResponse;
 import com.teco.pointtrack.entity.enums.AttendanceStatus;
@@ -241,5 +253,14 @@ public class AttendanceController {
             jakarta.servlet.http.HttpServletResponse response) throws java.io.IOException {
 
         attendanceService.exportAttendanceToExcel(search, locationId, status, dateFrom, dateTo, shiftType, response);
+    }
+
+    @Operation(summary = "[Employee] Ca làm việc hôm nay")
+    @PreAuthorize("isAuthenticated()")
+    @GetMapping("/schedule/my-today")
+    public ResponseEntity<ApiResponse<java.util.List<WorkScheduleResponse>>> getMyTodaySchedules() {
+        Long userId = AuthUtils.getUserDetail().getId();
+        java.util.List<WorkScheduleResponse> data = attendanceService.getMyTodaySchedules(userId);
+        return ResponseEntity.ok(ApiResponse.success(data, "Lấy ca làm việc hôm nay thành công"));
     }
 }

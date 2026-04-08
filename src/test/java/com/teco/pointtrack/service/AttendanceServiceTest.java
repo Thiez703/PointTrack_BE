@@ -5,6 +5,9 @@ import com.teco.pointtrack.entity.SalaryLevel;
 import com.teco.pointtrack.entity.AttendanceRecord;
 import com.teco.pointtrack.entity.User;
 import com.teco.pointtrack.entity.WorkSchedule;
+import com.teco.pointtrack.entity.SystemSetting;
+import com.teco.pointtrack.dto.attendance.CheckInResponse;
+import com.teco.pointtrack.entity.enums.AttendanceStatus;
 import com.teco.pointtrack.dto.attendance.AdminUpdateAttendanceRequest;
 import com.teco.pointtrack.dto.attendance.CheckOutResponse;
 import com.teco.pointtrack.entity.enums.WorkScheduleStatus;
@@ -30,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -174,6 +178,57 @@ public class AttendanceServiceTest {
         assertEquals(expectedSalary, record.getEstimatedSalary());
         assertEquals(response.getWorkedMinutes(), record.getWorkedMinutes());
         assertEquals(response.getWorkedHours(), record.getWorkedHours());
+    }
+
+    @Test
+    void checkIn_WhenLateWithin15Minutes_ShouldStillBeOnTime() {
+        LocalDateTime now = LocalDateTime.now();
+
+        User user = User.builder().id(userId).build();
+        Customer customer = Customer.builder()
+                .id(1L)
+                .name("Khách hàng A")
+                .latitude(10.0)
+                .longitude(106.0)
+                .build();
+
+        WorkSchedule schedule = WorkSchedule.builder()
+                .id(workScheduleId)
+                .user(user)
+                .customer(customer)
+                .workDate(now.toLocalDate())
+                .startTime(now.toLocalTime().minusMinutes(10))
+                .endTime(now.toLocalTime().plusHours(1))
+                .scheduledStart(now.minusMinutes(10))
+                .scheduledEnd(now.plusHours(1))
+                .status(WorkScheduleStatus.SCHEDULED)
+                .build();
+
+        when(workScheduleRepo.findByIdAndDeletedAtIsNull(workScheduleId)).thenReturn(Optional.of(schedule));
+        when(attendanceRecordRepo.findByWorkScheduleId(workScheduleId)).thenReturn(Optional.empty());
+        when(userRepo.findByIdAndDeletedAtIsNull(userId)).thenReturn(Optional.of(user));
+        when(systemSettingRepo.findById("GRACE_PERIOD_MINUTES")).thenReturn(
+                Optional.of(SystemSetting.builder().key("GRACE_PERIOD_MINUTES").value("15").build())
+        );
+        when(systemSettingRepo.findById("GPS_RADIUS_METERS")).thenReturn(Optional.empty());
+        when(fileStorageService.storeAttendancePhoto(photo)).thenReturn("checkin.jpg");
+        when(photo.getSize()).thenReturn(1234L);
+        when(photo.getContentType()).thenReturn("image/jpeg");
+        when(photo.getOriginalFilename()).thenReturn("checkin.jpg");
+
+        CheckInResponse response = attendanceService.checkIn(
+                workScheduleId,
+                10.0,
+                106.0,
+                now,
+                "Đến trễ nhẹ",
+                photo,
+                userId
+        );
+
+        assertEquals(AttendanceStatus.ON_TIME, response.getStatus());
+        assertEquals(0, response.getLateMinutes());
+                verifyNoInteractions(explanationRepo);
     }
 
     @Test

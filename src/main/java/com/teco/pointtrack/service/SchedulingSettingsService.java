@@ -24,7 +24,7 @@ public class SchedulingSettingsService {
     static final String KEY_TRAVEL_BUFFER     = "TRAVEL_BUFFER_MINUTES";
     static final String KEY_PENALTY_RULES     = "PENALTY_RULES";
 
-    static final int DEFAULT_GRACE_PERIOD     = 5;
+    static final int DEFAULT_GRACE_PERIOD     = 15;
     static final int DEFAULT_TRAVEL_BUFFER    = 15;
     static final String DEFAULT_PENALTY_RULES = "[{\"minLateMinutes\":15,\"penaltyShift\":0.5},{\"minLateMinutes\":30,\"penaltyShift\":1.0}]";
 
@@ -53,7 +53,7 @@ public class SchedulingSettingsService {
     @Transactional
     public SchedulingSettingsResponse updateGracePeriod(GracePeriodRequest request) {
         saveSetting(KEY_GRACE_PERIOD, String.valueOf(request.getMinutes()),
-                "Số phút check-in muộn vẫn tính đúng giờ (BR-11)");
+            "Dung sai check-in ±N phút vẫn tính đúng giờ (BR-11)");
 
         log.info("Updated grace period: {}p", request.getMinutes());
         return getAll();
