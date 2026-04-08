@@ -45,7 +45,7 @@ Default admin account: `admin@pointtrack.com` / `Admin@123`
 
 ## Architecture
 
-**Spring Boot 3.5.5 + Java 21 REST API** for home service business management with GPS-based attendance tracking.
+**Spring Boot 3.5.5 + Java 25 REST API** for home service business management with GPS-based attendance tracking.
 
 Package root: `com.teco.pointtrack`
 

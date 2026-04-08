@@ -160,7 +160,7 @@ public class DataSeeder implements CommandLineRunner {
     }
 
     private void seedSystemSettings() {
-        createSettingIfNotExists("GRACE_PERIOD_MINUTES", "5", "BR-11");
+        createSettingIfNotExists("GRACE_PERIOD_MINUTES", "15", "Dung sai check-in ±15 phút (BR-11)");
         createSettingIfNotExists("TRAVEL_BUFFER_MINUTES", "15", "BR-09");
         createSettingIfNotExists("PENALTY_RULES", "[]", "BR-12");
         createSettingIfNotExists("GPS_RADIUS_METERS", "50", "BR-14");

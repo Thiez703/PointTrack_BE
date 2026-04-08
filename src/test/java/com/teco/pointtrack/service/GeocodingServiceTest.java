@@ -40,7 +40,6 @@ class GeocodingServiceTest {
     @SuppressWarnings("unchecked")
     void setUp() {
         when(webClientBuilder.build()).thenReturn(webClient);
-        when(redisTemplate.opsForValue()).thenReturn(valueOps);
         service = new GeocodingService(API_KEY, webClientBuilder, objectMapper, redisTemplate);
     }
 
@@ -59,6 +58,7 @@ class GeocodingServiceTest {
     @Test
     @DisplayName("geocode: Cache hit → trả về GeoPoint từ Redis, không gọi API")
     void geocode_cacheHit_returnsCachedGeoPoint() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
         when(valueOps.get(anyString())).thenReturn("10.7769," + "106.7009");
 
         GeoPoint result = service.geocode(TEST_ADDR);
@@ -72,6 +72,7 @@ class GeocodingServiceTest {
     @Test
     @DisplayName("geocode: API trả về OK → trả về GeoPoint và lưu cache")
     void geocode_apiOk_returnsGeoPointAndCaches() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
         when(valueOps.get(anyString())).thenReturn(null);
         mockApiResponse(okResponse("10.7769", "106.7009"));
 
@@ -86,6 +87,7 @@ class GeocodingServiceTest {
     @Test
     @DisplayName("geocode: ZERO_RESULTS → trả về null, không lưu cache")
     void geocode_zeroResults_returnsNull() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
         when(valueOps.get(anyString())).thenReturn(null);
         mockApiResponse("{\"status\":\"ZERO_RESULTS\",\"results\":[]}");
 
@@ -98,6 +100,7 @@ class GeocodingServiceTest {
     @Test
     @DisplayName("geocode: REQUEST_DENIED → trả về null")
     void geocode_requestDenied_returnsNull() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
         when(valueOps.get(anyString())).thenReturn(null);
         mockApiResponse("{\"status\":\"REQUEST_DENIED\",\"results\":[]}");
 
@@ -137,6 +140,7 @@ class GeocodingServiceTest {
     @Test
     @DisplayName("geocode: exception từ WebClient → trả về null (graceful)")
     void geocode_webClientException_returnsNull() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
         when(valueOps.get(anyString())).thenReturn(null);
         when(webClient.get()).thenThrow(new RuntimeException("Network error"));
 

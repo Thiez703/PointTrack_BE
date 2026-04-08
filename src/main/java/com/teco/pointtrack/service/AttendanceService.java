@@ -34,6 +34,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 
 @Service
 @RequiredArgsConstructor
@@ -76,6 +77,7 @@ public class AttendanceService {
     private final CustomerRepository           customerRepo;
     private final SystemSettingRepository      systemSettingRepo;
     private final FileStorageService           fileStorageService;
+    private final ShiftRepository              shiftRepo;
 
     // ═════════════════════════════════════════════════════════════════════════
     // BR-14 + BR-15 + BR-16: CHECK-IN
@@ -123,7 +125,8 @@ public class AttendanceService {
         if (schedule.getStatus() == WorkScheduleStatus.CANCELLED) {
             throw new ConflictException("Ca này đã bị hủy");
         }
-        if (schedule.getStatus() != WorkScheduleStatus.SCHEDULED) {
+        if (schedule.getStatus() != WorkScheduleStatus.SCHEDULED
+            && schedule.getStatus() != WorkScheduleStatus.CONFIRMED) {
             throw new BadRequestException("Trạng thái ca không hợp lệ để check-in: " + schedule.getStatus());
         }
 
@@ -176,11 +179,15 @@ public class AttendanceService {
             */
         }
 
-        // ── 5. Tính số phút đi muộn ───────────────────────────────────────────
-        LocalDateTime now           = LocalDateTime.now(ZoneId.of("Asia/Ho_Chi_Minh"));
-        int gracePeriod             = getIntSetting(KEY_GRACE_PERIOD, DEFAULT_GRACE_PERIOD);
-        LocalDateTime latestOnTime  = schedule.getScheduledStart().plusMinutes(gracePeriod);
-        int lateMinutes             = (int) Math.max(0, ChronoUnit.MINUTES.between(latestOnTime, now));
+        // ── 5. Tính dung sai check-in ±N phút quanh giờ bắt đầu ca ───────────
+        LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Ho_Chi_Minh"));
+        int checkInToleranceMinutes = getIntSetting(KEY_GRACE_PERIOD, DEFAULT_GRACE_PERIOD);
+
+        // offset > 0: check-in muộn; offset < 0: check-in sớm
+        long checkInOffsetMinutes = ChronoUnit.MINUTES.between(schedule.getScheduledStart(), now);
+        int lateMinutes = checkInOffsetMinutes > checkInToleranceMinutes
+            ? (int) (checkInOffsetMinutes - checkInToleranceMinutes)
+            : 0;
 
         // ── 6. Xác định status bản ghi ────────────────────────────────────────
         AttendanceStatus status = lateMinutes > 0 ? AttendanceStatus.LATE : AttendanceStatus.ON_TIME;
@@ -611,17 +618,42 @@ public class AttendanceService {
 
         workScheduleRepo.save(schedule);
 
-        return mapToResponse(schedule);
+        return mapToResponse(schedule, null);
     }
 
     @Transactional(readOnly = true)
     public List<WorkScheduleResponse> getAllWorkSchedules() {
         return workScheduleRepo.findAll().stream()
-                .map(this::mapToResponse)
+                .map(schedule -> mapToResponse(schedule, null))
                 .toList();
     }
 
-    private WorkScheduleResponse mapToResponse(WorkSchedule schedule) {
+    @Transactional(readOnly = true)
+    public List<WorkScheduleResponse> getMyTodaySchedules(Long userId) {
+        ZoneId vnZone = ZoneId.of("Asia/Ho_Chi_Minh");
+        LocalDate today = LocalDate.now(vnZone);
+
+        List<WorkSchedule> schedules = workScheduleRepo.findByUserIdAndWorkDate(userId, today);
+        if (schedules.isEmpty()) {
+            return List.of();
+        }
+
+        List<Long> scheduleIds = schedules.stream().map(WorkSchedule::getId).toList();
+        Map<Long, AttendanceRecord> attendanceByScheduleId = attendanceRecordRepo
+                .findByWorkScheduleIdIn(scheduleIds)
+                .stream()
+                .filter(record -> record.getWorkSchedule() != null && record.getWorkSchedule().getId() != null)
+                .collect(java.util.stream.Collectors.toMap(
+                        record -> record.getWorkSchedule().getId(),
+                        Function.identity(),
+                        (first, second) -> first));
+
+        return schedules.stream()
+                .map(schedule -> mapToResponse(schedule, attendanceByScheduleId.get(schedule.getId())))
+                .toList();
+    }
+
+    private WorkScheduleResponse mapToResponse(WorkSchedule schedule, AttendanceRecord record) {
         // Lấy thông tin User an toàn
         Long userId = (schedule.getUser() != null) ? schedule.getUser().getId() : null;
         String userName = (schedule.getUser() != null) ? schedule.getUser().getFullName() : "N/A";
@@ -650,6 +682,11 @@ public class AttendanceService {
             lng = schedule.getCustomer().getLongitude();
         }
 
+        String customerName = schedule.getCustomer() != null ? schedule.getCustomer().getName() : null;
+        String customerAddress = schedule.getCustomer() != null ? schedule.getCustomer().getAddress() : null;
+        Double customerLat = schedule.getCustomer() != null ? schedule.getCustomer().getLatitude() : null;
+        Double customerLng = schedule.getCustomer() != null ? schedule.getCustomer().getLongitude() : null;
+
         return WorkScheduleResponse.builder()
                 .id(schedule.getId())
                 .userId(userId)
@@ -660,6 +697,15 @@ public class AttendanceService {
                 .address(addr)
                 .lat(lat)
                 .lng(lng)
+                .status(schedule.getStatus())
+                .customerName(customerName)
+                .customerAddress(customerAddress)
+                .customerLatitude(customerLat)
+                .customerLongitude(customerLng)
+                .note(schedule.getNote())
+                .attendanceRecordId(record != null ? record.getId() : null)
+                .checkInTime(record != null ? record.getCheckInTime() : null)
+                .checkOutTime(record != null ? record.getCheckOutTime() : null)
                 .build();
     }
 
@@ -833,6 +879,8 @@ public class AttendanceService {
             int page, int limit,
             String search, Long customerId, String statusStr,
             LocalDate dateFrom, LocalDate dateTo, String shiftType) {
+
+        backfillAttendanceFromShifts(dateFrom, dateTo);
 
         // ── 1. Validate dateFrom <= dateTo ────────────────────────────────────
         if (dateFrom != null && dateTo != null && dateFrom.isAfter(dateTo)) {
@@ -1150,6 +1198,99 @@ public class AttendanceService {
             case OVERTIME        -> "Tăng ca";
             case PENDING_APPROVAL -> "Chờ duyệt";
         };
+    }
+
+    private void backfillAttendanceFromShifts(LocalDate dateFrom, LocalDate dateTo) {
+        ZoneId vnZone = ZoneId.of("Asia/Ho_Chi_Minh");
+        LocalDate from = dateFrom != null ? dateFrom.minusDays(1) : LocalDate.now(vnZone).minusDays(30);
+        LocalDate to = dateTo != null ? dateTo.plusDays(1) : LocalDate.now(vnZone).plusDays(1);
+
+        List<Shift> shifts = shiftRepo.findShiftsForAttendanceBackfill(from, to);
+        if (shifts.isEmpty()) {
+            return;
+        }
+
+        for (Shift shift : shifts) {
+            if (shift.getEmployee() == null || shift.getCheckInTime() == null) {
+                continue;
+            }
+
+            WorkSchedule schedule = workScheduleRepo
+                    .findByUserIdAndWorkDateAndStartTimeAndEndTimeAndDeletedAtIsNull(
+                            shift.getEmployee().getId(),
+                            shift.getShiftDate(),
+                            shift.getStartTime(),
+                            shift.getEndTime())
+                    .orElseGet(() -> {
+                        LocalDateTime scheduledStart = LocalDateTime.of(shift.getShiftDate(), shift.getStartTime());
+                        LocalDateTime scheduledEnd = LocalDateTime.of(shift.getShiftDate(), shift.getEndTime());
+                        if (!scheduledEnd.isAfter(scheduledStart)) {
+                            scheduledEnd = scheduledEnd.plusDays(1);
+                        }
+
+                        return WorkSchedule.builder()
+                                .user(shift.getEmployee())
+                                .customer(shift.getCustomer())
+                                .workDate(shift.getShiftDate())
+                                .startTime(shift.getStartTime())
+                                .endTime(shift.getEndTime())
+                                .address(shift.getCustomer() != null ? shift.getCustomer().getAddress() : null)
+                                .latitude(shift.getCustomer() != null ? shift.getCustomer().getLatitude() : null)
+                                .longitude(shift.getCustomer() != null ? shift.getCustomer().getLongitude() : null)
+                                .scheduledStart(scheduledStart)
+                                .scheduledEnd(scheduledEnd)
+                                .status(WorkScheduleStatus.SCHEDULED)
+                                .note(shift.getNotes())
+                                .build();
+                    });
+
+            schedule.setCustomer(shift.getCustomer());
+            schedule.setAddress(shift.getCustomer() != null ? shift.getCustomer().getAddress() : schedule.getAddress());
+            schedule.setLatitude(shift.getCustomer() != null ? shift.getCustomer().getLatitude() : schedule.getLatitude());
+            schedule.setLongitude(shift.getCustomer() != null ? shift.getCustomer().getLongitude() : schedule.getLongitude());
+            schedule.setStatus(shift.getStatus() == ShiftStatus.COMPLETED || shift.getStatus() == ShiftStatus.MISSING_OUT
+                    ? WorkScheduleStatus.COMPLETED
+                    : WorkScheduleStatus.IN_PROGRESS);
+            schedule.setNote(shift.getNotes());
+            schedule = workScheduleRepo.save(schedule);
+                final WorkSchedule savedSchedule = schedule;
+
+            AttendanceRecord record = attendanceRecordRepo.findByWorkScheduleId(schedule.getId())
+                    .orElseGet(() -> AttendanceRecord.builder()
+                        .workSchedule(savedSchedule)
+                            .user(shift.getEmployee())
+                            .status(AttendanceStatus.ON_TIME)
+                            .lateMinutes(0)
+                            .earlyLeaveMinutes(0)
+                            .otMultiplier(shift.getOtMultiplier() != null ? shift.getOtMultiplier() : BigDecimal.ONE)
+                            .note(shift.getNotes())
+                            .build());
+
+            record.setCheckInTime(shift.getCheckInTime());
+            record.setCheckInLat(shift.getCheckInLat());
+            record.setCheckInLng(shift.getCheckInLng());
+            record.setCheckInDistanceMeters(shift.getCheckInDistanceMeters());
+
+            if (shift.getCheckOutTime() != null) {
+                record.setCheckOutTime(shift.getCheckOutTime());
+                record.setCheckOutLat(shift.getCheckOutLat());
+                record.setCheckOutLng(shift.getCheckOutLng());
+                record.setCheckOutDistanceMeters(shift.getCheckOutDistanceMeters());
+            }
+
+            if (shift.getActualMinutes() != null) {
+                long workedMinutes = Math.max(0, shift.getActualMinutes());
+                record.setActualMinutes(shift.getActualMinutes());
+                record.setWorkedMinutes(workedMinutes);
+                record.setWorkedHours(calculateWorkedHours(workedMinutes));
+            }
+
+            if (record.getStatus() == null) {
+                record.setStatus(AttendanceStatus.ON_TIME);
+            }
+
+            attendanceRecordRepo.save(record);
+        }
     }
 
     // ── Chuyển đổi AttendanceRecord → AttendanceHistoryResponse ──────────────

@@ -220,4 +220,20 @@ public interface ShiftRepository extends JpaRepository<Shift, Long> {
             @Param("employeeId") Long employeeId,
             @Param("startDate")  LocalDate startDate,
             @Param("endDate")    LocalDate endDate);
+
+    @Query("""
+            SELECT s FROM Shift s
+            WHERE s.employee IS NOT NULL
+              AND s.shiftDate BETWEEN :from AND :to
+              AND s.checkInTime IS NOT NULL
+              AND s.status IN (
+                  com.teco.pointtrack.entity.enums.ShiftStatus.IN_PROGRESS,
+                  com.teco.pointtrack.entity.enums.ShiftStatus.COMPLETED,
+                  com.teco.pointtrack.entity.enums.ShiftStatus.MISSING_OUT
+              )
+            ORDER BY s.shiftDate ASC, s.startTime ASC
+            """)
+    List<Shift> findShiftsForAttendanceBackfill(
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to);
 }
