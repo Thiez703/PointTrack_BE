@@ -12,7 +12,7 @@ spring:
     allow-bean-definition-overriding: true
 
   datasource:
-    url: jdbc:mysql://pointtrack-db:3306/pointtrack_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia%2FHo_Chi_Minh
+    url: jdbc:mysql://db:3306/pointtrack_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia%2FHo_Chi_Minh
     username: ${SPRING_DATASOURCE_USERNAME:root}
     password: ${SPRING_DATASOURCE_PASSWORD:123456}
     driver-class-name: com.mysql.cj.jdbc.Driver

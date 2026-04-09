@@ -1,8 +1,16 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   db:
     image: mysql:8.0
     container_name: pointtrack-db
     restart: always
+    tty: true
+    logging: *default-logging
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-pointtrack_db}
@@ -23,6 +31,8 @@ services:
     image: redis:alpine
     container_name: pointtrack-redis
     restart: always
+    tty: true
+    logging: *default-logging
     ports:
       - "${REDIS_PORT:-6379}:6379"
     healthcheck:
@@ -37,6 +47,8 @@ services:
       dockerfile: Dockerfile
     container_name: pointtrack-app
     restart: always
+    tty: true
+    logging: *default-logging
     depends_on:
       db:
         condition: service_healthy
@@ -58,6 +70,14 @@ services:
       APP_SERVER_URL: http://localhost:8081
       APP_COOKIE_SECURE: ${APP_COOKIE_SECURE:-true}
       SPRING_JPA_HIBERNATE_DDL_AUTO: ${HIBERNATE_DDL_AUTO:-update}
+      SPRING_OUTPUT_ANSI_ENABLED: ${SPRING_OUTPUT_ANSI_ENABLED:-ALWAYS}
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--Dfile.encoding=UTF-8}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/api/v1/actuator/health || wget -q -O - http://127.0.0.1:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
 
 volumes:
   mysql_data:
